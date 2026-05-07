@@ -49,6 +49,7 @@ class GenericAgent:
         self.is_running = False; self.stop_sig = False
         self.llm_no = 0;  self.inc_out = False; self.verbose = True
         self.peer_hint = True
+        self.log_path = os.path.join(script_dir, f'temp/model_responses/model_responses_{int(time.time()*1e6)%1000000:06d}.txt')
         self.load_llm_sessions()
 
     def load_llm_sessions(self):
@@ -143,8 +144,8 @@ class GenericAgent:
                 handler.working['key_info'] = ki
                 handler.working['passed_sessions'] = ps = self.handler.working.get('passed_sessions', 0) + 1
                 if ps > 0: handler.working['key_info'] += f'\n[SYSTEM] 此为 {ps} 个对话前设置的key_info，若已在新任务，先更新或清除工作记忆。\n'
-            self.handler = handler
-            # although new handler, the **full** history is in llmclient, so it is full history!
+            self.handler = handler  # although new handler, the **full** history is in llmclient, so it is full history!
+            self.llmclient.log_path = self.log_path
             gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, 
                                 handler, TOOLS_SCHEMA, max_turns=70, verbose=self.verbose)
             try:

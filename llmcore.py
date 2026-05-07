@@ -734,6 +734,7 @@ class ToolClient:
         self.last_tools = ''
         self.name = self.backend.name
         self.total_cd_tokens = 0
+        self.log_path = None
 
     def chat(self, messages, tools=None):
         tools = json.loads(json.dumps(tools, ensure_ascii=False)) if tools else tools
@@ -748,11 +749,11 @@ class ToolClient:
         full_prompt = self._build_protocol_prompt(messages, tools)
         print("Full prompt length:", len(full_prompt), 'chars')
         gen = self.backend.ask(full_prompt)
-        _write_llm_log('Prompt', full_prompt)
+        _write_llm_log('Prompt', full_prompt, self.log_path)
         raw_text = ''
         for chunk in gen:
             raw_text += chunk; yield chunk
-        _write_llm_log('Response', raw_text)
+        _write_llm_log('Response', raw_text, self.log_path)
         return self._parse_mixed_response(raw_text)
 
     def _prepare_tool_instruction(self, tools):
@@ -869,10 +870,10 @@ def _ensure_text_block(blocks):
     blocks.insert(1, {"type": "text", "text": txt})
     return txt
 
-def _write_llm_log(label, content):
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp/model_responses')
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f'model_responses_{os.getpid()}.txt')
+def _write_llm_log(label, content, log_path=None):
+    if not log_path:
+        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'temp/model_responses/model_responses_{os.getpid()}.txt')
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(log_path, 'a', encoding='utf-8', errors='replace') as f:
         f.write(f"=== {label} === {ts}\n{content}\n\n")
@@ -968,6 +969,7 @@ class NativeToolClient:
         self.backend.system = self._thinking_prompt()
         self.name = self.backend.name
         self._pending_tool_ids = []
+        self.log_path = None
     def set_system(self, extra_system):
         combined = f"{extra_system}\n\n{self._thinking_prompt()}" if extra_system else self._thinking_prompt()
         if combined != self.backend.system: print(f"[Debug] Updated system prompt, length {len(combined)} chars.")
@@ -993,12 +995,12 @@ class NativeToolClient:
             if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": ""})
         self._pending_tool_ids = []
         merged = {"role": "user", "content": tool_result_blocks + combined_content}
-        _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False, indent=2))
+        _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False, indent=2), self.log_path)
         gen = self.backend.ask(merged)
         try:
             while True: 
                 chunk = next(gen); yield chunk
         except StopIteration as e: resp = e.value
-        if resp: _write_llm_log('Response', resp.raw)
+        if resp: _write_llm_log('Response', resp.raw, self.log_path)
         if resp and hasattr(resp, 'tool_calls') and resp.tool_calls: self._pending_tool_ids = [tc.id for tc in resp.tool_calls]
         return resp

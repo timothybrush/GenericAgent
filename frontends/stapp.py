@@ -253,6 +253,7 @@ if prompt := st.chat_input("any task?"):
             with live.container(): render_segments([segs[i]])
             if i < len(segs) - 1: live = st.empty()
     st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.messages = st.session_state.messages[-50:]
     st.session_state.last_reply_time = int(time.time())
 
 if st.session_state.autonomous_enabled:
