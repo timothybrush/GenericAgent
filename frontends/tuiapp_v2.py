@@ -1211,6 +1211,7 @@ class GenericAgentTUI(App[None]):
         if found and found._body_widget is not None:
             try:
                 found._body_widget.update(self._build_assistant_body(found))
+                self.query_one("#messages", VerticalScroll).scroll_end(animate=False)
             except Exception:
                 self._refresh_messages()
         else:
