@@ -120,6 +120,23 @@ _TOOL_USE_RE = re.compile(r"<tool_use>\s*(\{.*?\})\s*</tool_use>", re.DOTALL)
 # model's actual reply disappears from the rendered output.
 _META_TAG_RE = re.compile(r"<(summary|thinking)>.*?</\1>\s*", re.DOTALL | re.IGNORECASE)
 
+# Preserve fenced + inline code spans during meta-tag stripping: otherwise text
+# the model put inside backticks (e.g. `<summary>x</summary>` as an example)
+# gets gutted, leaving bare empty backticks in the rendered output.
+_CODE_REGION_RE = re.compile(r"```.*?```|``[^`\n]+?``|`[^`\n]+?`", re.DOTALL)
+
+def _strip_meta_tags(text: str) -> str:
+    if "<" not in text:
+        return text
+    out: list[str] = []
+    last = 0
+    for m in _CODE_REGION_RE.finditer(text):
+        out.append(_META_TAG_RE.sub("", text[last:m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(_META_TAG_RE.sub("", text[last:]))
+    return "".join(out)
+
 
 # Rotating usage tips, picked once per launch.
 _TIPS = (
@@ -3563,7 +3580,7 @@ class GenericAgentTUI(App[None]):
             text = _TASKLIST_OPEN_RE.sub(r"\1☐ ", text)
             text = _TASKLIST_DONE_RE.sub(r"\1✔ ", text)
             text = _TOOL_USE_RE.sub(_render_tool_use_block, text)
-            text = _META_TAG_RE.sub("", text)
+            text = _strip_meta_tags(text)
             from io import StringIO
             from rich.console import Console
             render_w = max(1, width - 1)
