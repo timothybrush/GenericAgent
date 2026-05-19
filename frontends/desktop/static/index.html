@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>GenericAgent 桌面版</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ====================================================================
+     界面骨架 mockup。只展示【老师明确要求】的东西。
+     老师要求(4项)：① 侧边栏美术 ② 预设prompt=新功能(展示+入口)
+                     ③ 融 hub.pyw(imbot+后台进程) ④ 会话/摘要+token+subagent
+     左侧每个导航 = 一个独立页面，各自标注「该放什么」。
+     图标全部为内联 SVG 矢量图（无 emoji）。
+     ==================================================================== -->
+
+<div id="app">
+
+  <div class="body">
+
+    <!-- ① 左侧边栏（美术重点 · 老师要求#1）每项对应一个页面 -->
+    <aside class="sidebar" data-region="① 侧边栏（美术重点 · 老师要求#1）">
+      <div class="brand">
+        <div class="brand-logo">GA</div>
+        <div class="brand-text">
+          <div class="brand-name">GenericAgent</div>
+          <div class="brand-sub">桌面终端</div>
+        </div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <a class="nav-item active" data-page="chat">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 3.5 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z"/></svg>
+          <span>聊天</span>
+        </a>
+        <a class="nav-item" data-page="channels">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          <span>消息通道</span>
+        </a>
+        <a class="nav-item" data-page="status">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="18" y1="20" x2="18" y2="14"/></svg>
+          <span>状态面板</span>
+        </a>
+        <a class="nav-item" data-page="collab">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>协作动态</span>
+        </a>
+        <a class="nav-item" data-page="token">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.6c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1.1 1.5-2.5 1.5-2.5.7-2.5 1.7 1.1 1.8 2.5 1.8 2.5-.7 2.5-1.7"/></svg>
+          <span>Token 统计</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <a class="foot-row" id="settings-btn" data-note="点击弹出『配置』面板（主题色 / 语言切换；仅模板，未实现逻辑——留给实现者）">
+          <span class="fr-l">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>配置</span>
+          </span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </a>
+        <div class="foot-ver">GenericAgent · 桌面版</div>
+      </div>
+    </aside>
+
+    <!-- 中间主区：顶栏 + 多页面（一项导航一页）-->
+    <main class="main">
+
+      <div class="topbar" data-region="顶栏 · 仅运行状态（无新建会话，新建在右侧）">
+        <div class="tb-left">
+          <button class="run-state" id="run-toggle"
+            data-note="运行/停止：运行中点击=停止当前会话（POST /session/{sid}/cancel）。agent 无暂停，停止即终止本轮">
+            <i class="dot"></i> <span class="rs-label">运行中</span>
+          </button>
+        </div>
+        <div class="tb-right">
+          <button class="ic-btn" data-note="刷新状态/会话">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="pages">
+
+        <!-- ===== 页面1：聊天 ===== -->
+        <section class="page active" data-page="chat"
+                 data-region="聊天页 · 消息流 GET /session/{sid}/messages，WS 通知新内容">
+          <div class="msg-area">
+            <div class="annot-inline">该放：用户/助手消息气泡、turn 折叠、工具调用详情、任务计时、流式增量；<b>消息内容须支持 Markdown + LaTeX（行内 $…$ / 块级 $$…$$）+ 代码高亮</b>。空会话时展示下方预设功能（老师#2：一句 prompt=一个功能，既是展示也是入口）</div>
+            <div class="chat-start">
+              <div class="feature-head">
+                <div class="page-title">开始对话</div>
+                <div class="page-sub">直接输入，或点预设功能一键启动</div>
+              </div>
+              <div class="feature-grid">
+                <div class="fcard" data-note="② 注入预设prompt：读 L3 goal SOP 自主达成目标">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></svg>
+                  <div class="fc-t">Goal 模式</div><div class="fc-d">设定目标，自主完成</div>
+                </div>
+                <div class="fcard" data-note="② 注入预设prompt：自动浏览并周期汇总">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="16.2 7.8 14.1 14.1 7.8 16.2 9.9 9.9 16.2 7.8"/></svg>
+                  <div class="fc-t">自主探索</div><div class="fc-d">自动浏览并周期汇总</div>
+                </div>
+                <div class="fcard" data-note="② 注入预设prompt：拉起多 worker 协同(Hive)">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 21 7 21 17 12 22 3 17 3 7"/><polygon points="12 8 16 10.3 16 14.7 12 17 8 14.7 8 10.3"/></svg>
+                  <div class="fc-t">Hive 协作</div><div class="fc-d">多 worker 协同攻坚</div>
+                </div>
+                <div class="fcard" data-note="② 注入预设prompt：监察者模式严格验收">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <div class="fc-t">深度复核</div><div class="fc-d">挑刺式质量把关</div>
+                </div>
+                <div class="fcard" data-note="② 用户自存的预设示例：自定义预设统一用星标图标（表示『我保存的』），与内置功能区分">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <div class="fc-t">我的·周报</div><div class="fc-d">自定义：抓本周提交并写周报</div>
+                </div>
+                <div class="fcard add" data-note="② 体现『一句话即一个功能』：用户自存任意预设 prompt 为新卡片">
+                  <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <div class="fc-t">自定义</div><div class="fc-d">任意一句话存为功能</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="composer" data-region="② 输入区 · 发送=POST /session/{sid}/prompt">
+            <div class="composer-top">
+              <button class="ic-btn" data-note="附件/图片上传（多模态 [image:path]）—— 已移到输入框上方">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12 20.5a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <button class="ic-btn" id="preset-btn" data-note="② 预设功能：对话开始后也能随时点这里弹出预设卡片启动（与空状态那组同源）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 10 14 9 22 21 10 14 10 13 2"/></svg>
+              </button>
+            </div>
+            <textarea class="input" placeholder="输入消息… (Enter 发送, Shift+Enter 换行)"></textarea>
+            <div class="composer-bot">
+              <div class="cb-left">
+                <button class="chip" data-note="模型档位下拉，来自 mykey.py（GET /model-profiles）—— 已移到输入框下方；新增模型移到『配置』里">自动选择 <svg class="chip-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+                <button class="chip sm" data-note="② Plan：预设进入计划模式的一句 prompt">Plan</button>
+                <button class="chip sm" data-note="② Auto：预设进入自主/goal 模式的一句 prompt">
+                  <svg class="chip-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 10 14 9 22 21 10 14 10 13 2"/></svg>
+                  Auto
+                </button>
+              </div>
+              <button class="send" data-note="发送">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 页面：消息通道（老师要求#3 融 hub.pyw）===== -->
+        <section class="page" data-page="channels"
+                 data-region="③ imbot 渠道（融 hub.pyw 的渠道管理）">
+          <div class="page-pad">
+            <div class="page-title">消息通道</div>
+            <div class="page-sub">把 hub.pyw 管理的各 imbot 接入搬进来：每行一个渠道</div>
+            <div class="annot-inline">每行该放：渠道名、连接状态(在线/离线/错误)、启停开关、凭证/参数配置入口；底层对应 hub.pyw 拉起的 imbot 进程。真实版图标用各渠道品牌 logo</div>
+            <div class="list" id="chan-list">
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>微信</b><span class="lr-st on">在线</span><span class="grow"></span><button class="sw-mini on"><i></i></button><a class="link sm">配置</a></div>
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>企业微信</b><span class="lr-st off">离线</span><span class="grow"></span><button class="sw-mini"><i></i></button><a class="link sm">配置</a></div>
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>QQ</b><span class="lr-st off">离线</span><span class="grow"></span><button class="sw-mini"><i></i></button><a class="link sm">配置</a></div>
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>Telegram</b><span class="lr-st on">在线</span><span class="grow"></span><button class="sw-mini on"><i></i></button><a class="link sm">配置</a></div>
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>飞书</b><span class="lr-st off">离线</span><span class="grow"></span><button class="sw-mini"><i></i></button><a class="link sm">配置</a></div>
+              <div class="list-row"><svg class="lr-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><b>钉钉</b><span class="lr-st err">错误</span><span class="grow"></span><button class="sw-mini"><i></i></button><a class="link sm">配置</a></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 页面4：状态面板（老师要求#3 后台进程）===== -->
+        <section class="page" data-page="status"
+                 data-region="③ 后台进程/服务状态（融 hub.pyw 的进程管理）">
+          <div class="page-pad">
+            <div class="page-title">状态面板</div>
+            <div class="page-sub">hub.pyw 管理的后台进程/服务，集中查看与启停</div>
+            <div class="annot-inline">每行该放：进程名、PID、运行状态、CPU/内存、启动/停止/重启、查看日志；至少含 bridge、各 imbot、定时调度等</div>
+            <div class="list">
+              <div class="list-row"><b>bridge (:14168)</b><span class="lr-st on">运行</span><span class="kv">PID 1234</span><span class="kv">35MB</span><span class="grow"></span><a class="link sm">日志</a><a class="link sm">重启</a></div>
+              <div class="list-row"><b>imbot · 微信</b><span class="lr-st on">运行</span><span class="kv">PID 1290</span><span class="kv">61MB</span><span class="grow"></span><a class="link sm">日志</a><a class="link sm">停止</a></div>
+              <div class="list-row"><b>定时任务调度</b><span class="lr-st on">运行</span><span class="kv">PID 1305</span><span class="kv">22MB</span><span class="grow"></span><a class="link sm">日志</a><a class="link sm">停止</a></div>
+              <div class="list-row"><b>imbot · 钉钉</b><span class="lr-st err">异常</span><span class="kv">—</span><span class="kv">—</span><span class="grow"></span><a class="link sm">日志</a><a class="link sm">启动</a></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 页面5：协作动态（老师要求#4 subagent 监控）===== -->
+        <section class="page" data-page="collab"
+                 data-region="④ subagent / Hive 多体执行监控">
+          <div class="page-pad">
+            <div class="page-title">协作动态</div>
+            <div class="page-sub">subagent / Hive worker 的实时状态与产出</div>
+            <div class="annot-inline">该放：worker 卡片(名称/状态/当前子任务/进度) + BBS 帖子流 + 选中 worker 看其 output 流。数据源 temp/hive_*/、output.txt、agent_bbs；可参考现成 conductor.py 的 subagent 快照与 WS 推送</div>
+            <div class="card-row">
+              <div class="card-mini"><b>hive-master</b><div class="cm-st on">调度中</div><div class="cm-d">已派 3 子任务</div></div>
+              <div class="card-mini"><b>hive-worker-1</b><div class="cm-st on">执行中</div><div class="cm-d">子任务：抓取数据</div></div>
+              <div class="card-mini"><b>hive-worker-2</b><div class="cm-st on">执行中</div><div class="cm-d">子任务：复核结果</div></div>
+              <div class="card-mini"><b>subagent-abc</b><div class="cm-st idle">空闲</div><div class="cm-d">等待派单</div></div>
+            </div>
+            <div class="annot-inline">下方：BBS 帖子流（任务发布/接单/完成）+ 选中项的 output.txt 实时滚动</div>
+          </div>
+        </section>
+
+        <!-- ===== 页面6：Token 统计（老师要求#4 token 记录）===== -->
+        <section class="page" data-page="token"
+                 data-region="④ token 记录与成本">
+          <div class="page-pad">
+            <div class="page-title">Token 统计</div>
+            <div class="page-sub">每会话与累计的 token 用量及估算成本</div>
+            <div class="stat-row">
+              <div class="stat"><div class="s-n">1.24M</div><div class="s-l">累计 token</div></div>
+              <div class="stat"><div class="s-n">¥ 38.6</div><div class="s-l">估算成本</div></div>
+              <div class="stat"><div class="s-n">86k</div><div class="s-l">今日 token</div></div>
+            </div>
+            <div class="annot-inline">该放：汇总卡(累计/成本/今日) + 按会话明细表 + 趋势图。数据来自 bridge 的用量记录（_record_usage）</div>
+            <div class="list">
+              <div class="list-row head"><b>会话</b><span class="kv">模型</span><span class="kv">输入</span><span class="kv">输出</span><span class="kv">成本</span></div>
+              <div class="list-row"><b>选股分析</b><span class="kv">opus</span><span class="kv">42k</span><span class="kv">11k</span><span class="kv">¥9.2</span></div>
+              <div class="list-row"><b>批量整理</b><span class="kv">sonnet</span><span class="kv">120k</span><span class="kv">30k</span><span class="kv">¥6.1</span></div>
+              <div class="list-row"><b>Goal·部署</b><span class="kv">sonnet</span><span class="kv">88k</span><span class="kv">25k</span><span class="kv">¥4.4</span></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- ④ 右侧会话面板：会话管理 + 摘要（新建会话在此）-->
+    <aside class="rightpanel" data-region="④ 会话管理 · 老师要求#4 · GET /sessions">
+      <div class="search">
+        <svg class="search-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input placeholder="搜索会话…">
+      </div>
+      <button class="new-conv" data-note="新建会话 POST /session/new（新建只此一处）">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新对话
+      </button>
+      <div class="conv-list">
+        <div class="annot-inline">④ 列表项该含：标题、最后时间、状态点(运行/空闲/错误)；点击切换会话并加载历史</div>
+        <div class="conv-item active">
+          <span class="ci-dot"></span>
+          <div class="ci-main">
+            <div class="ci-title">选股分析</div>
+            <div class="ci-meta">运行中 · 2 分钟前</div>
+          </div>
+          <button class="ci-more" title="更多">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+          </button>
+        </div>
+        <div class="conv-item idle">
+          <span class="ci-dot"></span>
+          <div class="ci-main">
+            <div class="ci-title">批量整理文档</div>
+            <div class="ci-meta">空闲 · 1 小时前</div>
+          </div>
+          <button class="ci-more" title="更多">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="12" cy="19" r="1.7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 会话操作菜单（共用一个，按 ⋯ 位置弹出）-->
+      <div class="ctx-menu" id="conv-menu" hidden>
+        <div class="ctx-item" data-act="pin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6z"/></svg>
+          置顶
+        </div>
+        <div class="ctx-item danger" data-act="del">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          删除
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- 预设功能 弹窗（对话开始后从输入区按钮弹出；与聊天空状态那组同源）-->
+  <div class="modal" id="preset-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-label="预设功能">
+      <div class="modal-head">
+        <div class="modal-title">预设功能</div>
+        <button class="modal-x" data-close title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body preset-pop">
+        <div class="annot-inline">与聊天空状态的预设卡片同源（同一份功能数据）。点卡片＝注入一句 prompt 并关闭弹窗启动</div>
+        <div class="feature-grid">
+          <div class="fcard" data-note="② 注入预设prompt：读 L3 goal SOP 自主达成目标">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></svg>
+            <div class="fc-t">Goal 模式</div><div class="fc-d">设定目标，自主完成</div>
+          </div>
+          <div class="fcard" data-note="② 注入预设prompt：自动浏览并周期汇总">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polygon points="16.2 7.8 14.1 14.1 7.8 16.2 9.9 9.9 16.2 7.8"/></svg>
+            <div class="fc-t">自主探索</div><div class="fc-d">自动浏览并周期汇总</div>
+          </div>
+          <div class="fcard" data-note="② 注入预设prompt：拉起多 worker 协同(Hive)">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 21 7 21 17 12 22 3 17 3 7"/><polygon points="12 8 16 10.3 16 14.7 12 17 8 14.7 8 10.3"/></svg>
+            <div class="fc-t">Hive 协作</div><div class="fc-d">多 worker 协同攻坚</div>
+          </div>
+          <div class="fcard" data-note="② 注入预设prompt：监察者模式严格验收">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <div class="fc-t">深度复核</div><div class="fc-d">挑刺式质量把关</div>
+          </div>
+          <div class="fcard" data-note="② 用户自存的预设示例：自定义预设统一用星标图标（表示『我保存的』），与内置功能区分">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <div class="fc-t">我的·周报</div><div class="fc-d">自定义：抓本周提交并写周报</div>
+          </div>
+          <div class="fcard add" data-note="② 体现『一句话即一个功能』：用户自存任意预设 prompt 为新卡片">
+            <svg class="fc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <div class="fc-t">自定义</div><div class="fc-d">任意一句话存为功能</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加模型 弹窗（仅页面模板，未实现任何逻辑——留给实现者）-->
+  <div class="modal" id="add-model-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-label="添加模型">
+      <div class="modal-head">
+        <div class="modal-title">添加模型</div>
+        <button class="modal-x" data-close title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body"><!-- 空白页：内容留给实现者 --></div>
+    </div>
+  </div>
+
+  <!-- 配置 弹窗（主题色 / 语言；仅模板，未实现任何逻辑——留给实现者）-->
+  <div class="modal" id="settings-modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-label="配置">
+      <div class="modal-head">
+        <div class="modal-title">配置</div>
+        <button class="modal-x" data-close title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body set-body">
+        <div class="annot-inline">模板占位，未接逻辑。实现者：主题色 = 切换 <b>:root</b> 上的 --blue 等变量并持久化；语言 = 中英文案切换。全站颜色已变量化，改 :root 即可整体换肤</div>
+        <div>
+          <div class="set-sec-t">主题色</div>
+          <div class="swatches">
+            <span class="swatch s1 sel"></span>
+            <span class="swatch s2"></span>
+            <span class="swatch s3"></span>
+            <span class="swatch s4"></span>
+            <span class="swatch s5"></span>
+          </div>
+        </div>
+        <div>
+          <div class="set-sec-t">语言</div>
+          <select class="set-select" disabled>
+            <option>简体中文</option>
+            <option>English</option>
+          </select>
+        </div>
+        <div>
+          <div class="set-sec-t">模型</div>
+          <button class="set-btn" id="add-model-btn" data-note="点击弹出『添加模型』面板（仅模板，未实现逻辑）—— 从输入区移到此处">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>添加模型</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 世界之外的力量：标注模式开发工具，悬浮右下角，不属于产品本体 -->
+  <button id="toggle-annot" class="annot-fab">标注模式：开</button>
+</div>
+
+<script src="vendor/marked.min.js"></script>
+<script src="ga-web.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
