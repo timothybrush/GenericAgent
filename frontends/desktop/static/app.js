@@ -585,26 +585,100 @@ function sanitizeMarkdown(html) {
   rmv.forEach(el => el.remove());
   return tpl.innerHTML;
 }
+/* ═══════════════ LaTeX 保护 (PR移植) ═══════════════ */
+const _latexSlots = [];
+function protectLatex(text) {
+  _latexSlots.length = 0;
+  // 块级 $$...$$
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr) => {
+    const id = _latexSlots.length;
+    _latexSlots.push({ expr: expr.trim(), display: true });
+    return `<!--LATEX:${id}-->`;
+  });
+  // 行内 $...$（不贪婪，排除 $$ 和转义）
+  text = text.replace(/(?<!\\)\$([^\n$]+?)\$/g, (_, expr) => {
+    const id = _latexSlots.length;
+    _latexSlots.push({ expr: expr.trim(), display: false });
+    return `<!--LATEX:${id}-->`;
+  });
+  return text;
+}
+function restoreLatex(html) {
+  if (!_latexSlots.length) return html;
+  return html.replace(/<!--LATEX:(\d+)-->/g, (_, i) => {
+    const slot = _latexSlots[Number(i)];
+    if (!slot) return '';
+    if (typeof katex === 'undefined') {
+      return slot.display ? `<div class="katex-block">${escapeHtml(slot.expr)}</div>`
+                          : `<span class="katex-inline">${escapeHtml(slot.expr)}</span>`;
+    }
+    try {
+      const rendered = katex.renderToString(slot.expr, { displayMode: slot.display, throwOnError: false });
+      return slot.display ? `<div class="katex-block">${rendered}</div>`
+                          : `<span class="katex-inline">${rendered}</span>`;
+    } catch (_) { return escapeHtml(slot.expr); }
+  });
+}
+
 function renderMarkdown(text) {
   if (typeof marked === 'undefined') return escapeHtml(text).replace(/\n/g, '<br>');
-  try { return sanitizeMarkdown(marked.parse(String(text || ''))); }
-  catch (_) { return escapeHtml(text); }
+  try {
+    const protected_ = protectLatex(String(text || ''));
+    let html = sanitizeMarkdown(marked.parse(protected_));
+    html = restoreLatex(html);
+    return html;
+  } catch (_) { return escapeHtml(text); }
 }
 function renderAssistant(text) {
   let s = String(text || '');
   const folds = [];
-  const stash = (label, body) => { folds.push({ label, body }); return ` F${folds.length - 1} `; };
-  s = s.replace(/<thinking>[\s\S]*?<\/thinking>/gi, m => stash(t('fold.thinking'), m.replace(/<\/?thinking>/gi, '')));
-  s = s.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, m => stash(t('fold.tool'), m));
-  s = s.replace(/<function_results>[\s\S]*?<\/function_results>/gi, m => stash(t('fold.toolResult'), m));
-  s = s.replace(/(\**LLM Running \(Turn \d+\) \.\.\.\**)/g, m => stash(t('fold.llm'), m));
+  const stash = (label, body, cls) => { folds.push({ label, body, cls: cls || '' }); return ` F${folds.length - 1} `; };
+  s = s.replace(/<thinking>[\s\S]*?<\/thinking>/gi, m => stash(t('fold.thinking'), m.replace(/<\/?thinking>/gi, ''), 'fold-thinking'));
+  s = s.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, m => stash(t('fold.tool'), m, 'fold-tool'));
+  s = s.replace(/<function_results>[\s\S]*?<\/function_results>/gi, m => stash(t('fold.toolResult'), m, 'fold-result'));
+  s = s.replace(/(\**LLM Running \(Turn \d+\) \.\.\.\**)/g, m => stash(t('fold.llm'), m, 'fold-turn'));
   let html = renderMarkdown(s);
   html = html.replace(/F(\d+)/g, (_, i) => {
     const f = folds[Number(i)];
-    return `<details class="fold"><summary>${escapeHtml(f.label)}</summary><pre>${escapeHtml(f.body)}</pre></details>`;
+    return `<details class="fold ${f.cls || ''}"><summary>${escapeHtml(f.label)}</summary><pre class="fold-pre">${escapeHtml(f.body)}</pre></details>`;
   });
   return html;
 }
+/* ═══════════════ 渲染后增强 (PR移植) ═══════════════ */
+function postRenderEnhance(containerEl) {
+  if (!containerEl) return;
+  // 代码高亮 + 复制按钮
+  containerEl.querySelectorAll('pre code').forEach(block => {
+    if (typeof hljs !== 'undefined') hljs.highlightElement(block);
+    if (!block.parentElement.querySelector('.code-copy-btn')) {
+      const btn = document.createElement('button');
+      btn.className = 'code-copy-btn'; btn.textContent = 'Copy';
+      btn.onclick = () => {
+        navigator.clipboard.writeText(block.textContent).then(() => {
+          btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500);
+        });
+      };
+      block.parentElement.style.position = 'relative';
+      block.parentElement.appendChild(btn);
+    }
+  });
+  // KaTeX 复制按钮
+  containerEl.querySelectorAll('.katex-block').forEach(el => {
+    if (el.querySelector('.latex-copy-btn')) return;
+    const src = el.querySelector('annotation[encoding="application/x-tex"]');
+    if (!src) return;
+    const btn = document.createElement('button');
+    btn.className = 'latex-copy-btn'; btn.textContent = 'TeX';
+    btn.onclick = () => {
+      navigator.clipboard.writeText(src.textContent).then(() => {
+        btn.textContent = '✓'; setTimeout(() => btn.textContent = 'TeX', 1500);
+      });
+    };
+    el.style.position = 'relative';
+    el.appendChild(btn);
+  });
+}
+
 
 /* ═══════════════ 状态 ═══════════════ */
 const state = {
@@ -727,6 +801,7 @@ function msgNode(msg) {
   else if (msg.role === 'assistant') {
     const body = msg.stopped ? (msg.content + '\n\n_[' + t('status.stopped') + ']_') : msg.content;
     el.innerHTML = `<div class="bubble md">${renderAssistant(body)}</div>`;
+    postRenderEnhance(el.querySelector('.bubble'));
   }
   else if (msg.role === 'error') el.innerHTML = `<div class="bubble err">${escapeHtml(msg.content)}</div>`;
   else el.innerHTML = `<div class="bubble sys">${escapeHtml(msg.content)}</div>`;
@@ -743,6 +818,10 @@ function appendMessage(sess, msg) {
   refreshEmptyState(sess); scrollBottom();
 }
 function scrollBottom() { requestAnimationFrame(() => { msgArea.scrollTop = msgArea.scrollHeight; }); }
+/* ═══════════════ 打字机效果 (PR移植) ═══════════════ */
+const TW_SPEED = 12;  // 每 tick 显示字符数
+const TW_INTERVAL = 30; // ms
+
 function renderDraft(sess) {
   const r = rt(sess);
   if (!isActive(sess)) return;
@@ -750,8 +829,39 @@ function renderDraft(sess) {
   if (!r.draftEl || r.draftEl.parentNode !== box) {
     r.draftEl = document.createElement('div'); r.draftEl.className = 'msg assistant'; box.appendChild(r.draftEl);
   }
-  r.draftEl.innerHTML = `<div class="bubble md">${renderAssistant(r.draftText)}<span class="cursor"></span></div>`;
+  // 打字机：逐步显示
+  if (!r.twState) r.twState = { shown: 0, timer: null };
+  const tw = r.twState;
+  const full = r.draftText || '';
+  // 每次 renderDraft 被调用时启动/继续 tick
+  if (!tw.timer) {
+    tw.timer = setInterval(() => {
+      if (tw.shown >= full.length) {
+        // 全部显示完毕，等待新内容
+        clearInterval(tw.timer); tw.timer = null;
+        return;
+      }
+      tw.shown = Math.min(tw.shown + TW_SPEED, full.length);
+      const visible = full.slice(0, tw.shown);
+      r.draftEl.innerHTML = `<div class="bubble md">${renderAssistant(visible)}<span class="cursor"></span></div>`;
+      postRenderEnhance(r.draftEl.querySelector('.bubble'));
+      scrollBottom();
+    }, TW_INTERVAL);
+  }
+  // 如果新内容比已显示的长，timer 会继续追赶
+  // 如果是首次或 flush，立即渲染当前可见部分
+  const visible = full.slice(0, tw.shown || 0);
+  r.draftEl.innerHTML = `<div class="bubble md">${renderAssistant(visible || full)}<span class="cursor"></span></div>`;
+  postRenderEnhance(r.draftEl.querySelector('.bubble'));
   refreshEmptyState(sess); scrollBottom();
+}
+
+function flushTypewriter(sess) {
+  const r = rt(sess);
+  if (r.twState) {
+    if (r.twState.timer) clearInterval(r.twState.timer);
+    r.twState = null;
+  }
 }
 
 /* ═══════════════ 运行状态 ═══════════════ */
@@ -933,7 +1043,7 @@ function upsert(sess, raw, partial) {
   if (partial && m.role === 'assistant') { r.draftText = m.content; if (isActive(sess)) renderDraft(sess); return; }
   if (!m.id || r.seen.has(m.id)) return;
   r.seen.add(m.id); r.lastId = Math.max(r.lastId, m.id);
-  if (m.role === 'assistant' && r.draftEl) { r.draftEl.remove(); r.draftEl = null; r.draftText = ''; }
+  if (m.role === 'assistant' && r.draftEl) { flushTypewriter(sess); r.draftEl.remove(); r.draftEl = null; r.draftText = ''; }
   sess.messages.push(m); appendMessage(sess, m);
   saveSessions();
 }
