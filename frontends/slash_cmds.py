@@ -134,6 +134,105 @@ def list_reflect_tasks() -> list[dict]:
     return out
 
 
+# ----- hub.pyw parity: every launchable service ---------------------------
+
+_HUB_EXCLUDES = {"goal_mode.py", "chatapp_common.py", "tuiapp.py"}
+
+
+def _sniff_doc(p) -> str:
+    """Best-effort first line of a module docstring (cheap ~40-line read)."""
+    try:
+        head = p.read_text(encoding="utf-8", errors="ignore").splitlines()[:40]
+        joined = "\n".join(head)
+        for q in ('"""', "'''"):
+            i = joined.find(q)
+            if i != -1:
+                j = joined.find(q, i + 3)
+                if j != -1:
+                    body = joined[i + 3:j].strip()
+                    if body:
+                        return body.splitlines()[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def list_launchable_services() -> list[dict]:
+    """Mirror hub.pyw's discover_services() so `/scheduler` shows the *same*
+    set of launchable services as the GUI launcher.
+
+    Sources (hub.pyw EXCLUDES = goal_mode.py / chatapp_common.py / tuiapp.py):
+      • reflect/*.py   (not '_'-prefixed, not excluded)
+          → cmd = [python, agentmain.py, --reflect, reflect/<f>]
+      • frontends/*app*.py (not excluded)
+          → 'stapp' → `python -m streamlit run … --server.headless=true`
+            others   → `python frontends/<f>`
+
+    Returns [{name, cmd, doc, kind}] where `name` is the hub-style path
+    ('reflect/foo.py' / 'frontends/bar.py') and doubles as the picker value.
+    """
+    out: list[dict] = []
+    refl = _ROOT / "reflect"
+    if refl.is_dir():
+        for p in sorted(refl.glob("*.py")):
+            if p.name.startswith("_") or p.name in _HUB_EXCLUDES:
+                continue
+            rel = "reflect/" + p.name
+            out.append({
+                "name": rel,
+                "cmd": [sys.executable, "agentmain.py", "--reflect", rel],
+                "doc": _sniff_doc(p),
+                "kind": "reflect",
+            })
+    fe = _ROOT / "frontends"
+    if fe.is_dir():
+        for p in sorted(fe.glob("*.py")):
+            if "app" not in p.name or p.name in _HUB_EXCLUDES:
+                continue
+            rel = "frontends/" + p.name
+            if "stapp" in p.name:
+                cmd = [sys.executable, "-m", "streamlit", "run", rel,
+                       "--server.headless=true"]
+            else:
+                cmd = [sys.executable, rel]
+            out.append({"name": rel, "cmd": cmd, "doc": _sniff_doc(p),
+                        "kind": "frontend"})
+    return out
+
+
+def start_service(name: str) -> tuple[bool, str]:
+    """Launch a service from list_launchable_services(), detached & window-less
+    (CONSTITUTION rule 14: creationflags at the launch layer only, never via
+    subprocess.Popen monkeypatch).
+
+    `name` accepts the hub-style path ('reflect/foo.py') or a bare reflect stem
+    ('foo') for backward-compat with `/scheduler start <stem>`.
+    """
+    svcs = list_launchable_services()
+    svc = next((s for s in svcs if s["name"] == name), None)
+    if svc is None:  # bare reflect stem fallback
+        cand = "reflect/" + name + ".py"
+        svc = next((s for s in svcs if s["name"] == cand), None)
+    if svc is None:
+        return False, f"未知服务: {name}"
+    try:
+        flags = 0
+        if os.name == "nt":
+            flags = 0x00000200 | 0x08000000  # NEW_PROCESS_GROUP | NO_WINDOW
+        subprocess.Popen(
+            svc["cmd"],
+            cwd=str(_ROOT),
+            creationflags=flags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        return True, f"已启动 {svc['name']}"
+    except Exception as e:
+        return False, f"启动失败: {type(e).__name__}: {e}"
+
+
 def list_scheduler_tasks() -> list[dict]:
     """Return [{name, path, schedule, enabled}] for every sche_tasks/*.json.
 

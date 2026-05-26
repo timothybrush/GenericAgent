@@ -3459,28 +3459,31 @@ class GenericAgentTUI(App[None]):
             names = (parts[1] if len(parts) > 1 else "").replace(",", " ").split()
             if not names:
                 self._system("Usage: /scheduler start <reflect_name>[,<name2>...]"); return
-            self._launch_reflect_batch(names)
+            self._launch_service_batch(names)
             return
         # Default: surface a MultiChoiceList picker for reflect/*.py so the
         # user can tick several tasks at once (Space toggle, Enter submit).
         # sche_tasks/*.json are read-only — shown below as a system advisory
         # so the user still has visibility, but they can't be launched here.
-        reflects = slash_cmds.list_reflect_tasks()
+        services = slash_cmds.list_launchable_services()
         sched = slash_cmds.list_scheduler_tasks()
-        if not reflects:
-            self._system("📋 reflect/ 目录下没有 *.py，无可启动任务"); return
+        if not services:
+            self._system("📋 没有可启动的服务（reflect/*.py 与 frontends/*app*.py 均为空）"); return
+        # Mirror hub.pyw: reflect tasks + frontend apps, grouped by kind so the
+        # picker reads like the GUI launcher.  Picker value = hub-style path.
         choices = []
-        for r in reflects:
-            doc = f"  — {r['doc']}" if r['doc'] else ""
-            choices.append((f"{r['name']}{doc}", r['name']))
+        for kind in ("reflect", "frontend"):
+            for s in (svc for svc in services if svc["kind"] == kind):
+                doc = f"  — {s['doc']}" if s["doc"] else ""
+                choices.append((f"{s['name']}{doc}", s["name"]))
         sess = self.current
         msg = ChatMessage(
             role="system",
-            content=("📋 选择要启动的 reflect 任务（Space 勾选 · Enter 提交 · Esc 取消）"
-                     "    多选支持 — 提交后批量启动并显示结果"),
+            content=("📋 选择要启动的服务（与 hub.pyw 一致：reflect 任务 + frontend 应用）"
+                     "    Space 勾选 · Enter 提交 · Esc 取消 — 提交后还需二次确认"),
             kind="multi_choice",
             choices=choices,
-            on_select=lambda names: self._launch_reflect_batch(names),
+            on_select=lambda names: self._scheduler_confirm(names),
         )
         sess.messages.append(msg)
         # Cron tasks as a separate read-only advisory line.
@@ -3493,16 +3496,43 @@ class GenericAgentTUI(App[None]):
             self._system("\n".join(lines))
         self._refresh_messages()
 
-    def _launch_reflect_batch(self, names: list[str]) -> None:
-        """Shared by `/scheduler start ...` and the multi_choice picker.
-        Launches every requested reflect/<name>.py via slash_cmds and prints
-        a single ✅/❌ summary block."""
+    def _scheduler_confirm(self, names: list[str]) -> None:
+        """Picker submitted → ask one more `commit answer` confirmation card
+        before actually launching anything (user-requested safety step)."""
+        if not names:
+            self._system("（未选择任何服务）"); return
+        sess = self.current
+        if sess is None: return
+        joined = "、".join(names)
+        confirm = ChatMessage(
+            role="system",
+            content=(f"⚠️ 确认启动以下 {len(names)} 个服务？\n  {joined}"
+                     "    ←/→ 选择 · Enter 确认 · Esc 取消"),
+            kind="choice",
+            choices=[("✅ 确认启动", "__SCHED_GO__"), ("取消", "__SCHED_CANCEL__")],
+            on_select=lambda v, ns=list(names): self._scheduler_commit(v, ns),
+        )
+        sess.messages.append(confirm)
+        self._refresh_messages()
+
+    def _scheduler_commit(self, value: str, names: list[str]) -> str:
+        """on_select for the commit-answer card; returns the breadcrumb text
+        shown after the card collapses (see _collapse_choice)."""
+        if value != "__SCHED_GO__":
+            return "已取消，未启动任何服务"
+        self._launch_service_batch(names)
+        return f"已确认 — 提交启动 {len(names)} 个服务"
+
+    def _launch_service_batch(self, names: list[str]) -> None:
+        """Shared by `/scheduler start ...` (CLI) and the confirmed picker.
+        Launches every requested service via slash_cmds.start_service and
+        prints a single ✅/❌ summary block."""
         from frontends import slash_cmds
         if not names:
-            self._system("（未选择任何 reflect 任务）"); return
-        lines = [f"🚀 批量启动 {len(names)} 个 reflect 任务："]
+            self._system("（未选择任何服务）"); return
+        lines = [f"🚀 批量启动 {len(names)} 个服务："]
         for n in names:
-            ok, msg = slash_cmds.start_reflect_task(n)
+            ok, msg = slash_cmds.start_service(n)
             lines.append(("  ✅ " if ok else "  ❌ ") + msg)
         self._system("\n".join(lines))
 

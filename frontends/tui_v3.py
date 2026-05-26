@@ -3671,38 +3671,50 @@ class SB:
             if head in ('start', 'run'):
                 names = (parts[1] if len(parts) > 1 else '').replace(',', ' ').split()
                 if not names:
-                    self.commit(['Usage: /scheduler start <reflect>[,<reflect2>...]'])
+                    self.commit(['Usage: /scheduler start <service>[,<service2>...]'])
                 else:
                     lines = []
                     for n in names:
-                        ok, msg = slash_cmds.start_reflect_task(n)
+                        ok, msg = slash_cmds.start_service(n)
                         lines.append(('✅ ' if ok else '❌ ') + msg)
                     self.commit(lines)
             else:
-                reflects = slash_cmds.list_reflect_tasks()
-                if not reflects:
-                    self.commit(['(reflect/ 目录下没有 *.py)']); return
+                # Mirror hub.pyw discover_services(): reflect tasks + frontend
+                # apps, so the picker shows the same set as the GUI launcher.
+                services = slash_cmds.list_launchable_services()
+                if not services:
+                    self.commit(['(没有可启动的服务: reflect/*.py 与 frontends/*app*.py 均为空)']); return
+                ordered = ([s for s in services if s['kind'] == 'reflect'] +
+                           [s for s in services if s['kind'] == 'frontend'])
                 options = []
-                for r in reflects:
-                    doc = f"  — {r['doc']}" if r['doc'] else ''
-                    options.append(f"{r['name']}{doc}")
+                for s in ordered:
+                    doc = f"  — {s['doc']}" if s['doc'] else ''
+                    options.append(f"{s['name']}{doc}")
 
-                # Multi-select menu: Space ticks, Enter starts every ticked
-                # task back-to-back.  Empty submit is a no-op (user pressed
-                # Enter without ticking anything).
-                def _pick_reflects(idxs: list[int]) -> None:
+                # Two-step: Space ticks → Enter → commit-answer confirm → run.
+                # Empty submit is a no-op (Enter without ticking anything).
+                def _pick_services(idxs: list[int]) -> None:
                     if not idxs:
-                        self.commit(['(no reflect task picked)']); return
-                    lines = []
-                    for i in idxs:
-                        nm = reflects[i]['name']
-                        ok, msg = slash_cmds.start_reflect_task(nm)
-                        lines.append(('✅ ' if ok else '❌ ') + msg)
-                    self.commit(lines)
+                        self.commit(['(no service picked)']); return
+                    chosen = [ordered[i]['name'] for i in idxs]
+
+                    def _confirm(ci: int) -> None:
+                        if ci != 0:
+                            self.commit(['已取消，未启动任何服务']); return
+                        lines = []
+                        for nm in chosen:
+                            ok, msg = slash_cmds.start_service(nm)
+                            lines.append(('✅ ' if ok else '❌ ') + msg)
+                        self.commit(lines)
+
+                    self._show_menu(
+                        f'确认启动这 {len(chosen)} 个服务？  ' + '、'.join(chosen),
+                        ['✅ 确认启动', '取消'], _confirm, multi_select=False,
+                    )
 
                 self._show_menu(
-                    'Pick reflect tasks to start  [Space toggle · Enter run · or /scheduler start a,b,c]',
-                    options, _pick_reflects, multi_select=True,
+                    'Pick services to start  [Space toggle · Enter next · or /scheduler start a,b,c]',
+                    options, _pick_services, multi_select=True,
                 )
         elif name == 'llm':
             if arg:
