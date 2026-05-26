@@ -1768,6 +1768,7 @@ class InputArea(TextArea):
         # blocks the UI for seconds on long pastes (cf. PR#479, user report
         # 2026-05-27 "ctrl+s 完全卡死"). `reset()` clears in-place.
         Binding("ctrl+s",      "stash", "Stash", show=False),
+        Binding("cmd+s",       "stash", "Stash", show=False),
     ]
 
     def action_noop(self) -> None:

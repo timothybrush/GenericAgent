@@ -641,6 +641,10 @@ def _ptk_keypress_to_bytes(kp) -> bytes:
 
     key = getattr(kp, 'key', None)
     data = getattr(kp, 'data', '') or ''
+    mods = {str(m).lower().replace('_', '-') for m in (getattr(kp, 'modifiers', None) or ())}
+    modded_s = str(key).lower().replace('_', '-') == 's' or data == 's'
+    if modded_s and any(m in mods for m in ('control', 'ctrl', 'command', 'cmd')):
+        return b'\x13'
 
     # Printable text and paste chunks.  PTK may deliver a multi-character data
     # string for bracketed paste/typeahead; forwarding UTF-8 preserves CJK/emoji.
@@ -661,6 +665,8 @@ def _ptk_keypress_to_bytes(kp) -> bytes:
         return b'\r'
     if has('controlj', 'c-j', 's-enter', 'shift-enter'):
         return b'\n'
+    if has('controls', 'control-s', 'c-s', 'commands', 'command-s', 'cmd-s'):
+        return b'\x13'
 
     # Navigation.  Existing _keys() uses these small control bytes.
     if has('up') and has('shift'):
@@ -1897,6 +1903,7 @@ class SB:
         self._rb = b''; self._tail = b''; self._bp = False; self._pbytes = b''
         self.hist: list[str] = []; self._hi = -1
         self._hist_stash = ''           # live draft preserved while browsing history
+        self._draft_stash = ''
         self._session_name = ''         # set by /new <name>; shown in banner / status
         self._tip_idx = random.randrange(max(1, tip_count()))  # banner tip, fixed per launch
         self._btws: list[list] = []     # [question, answer|None] — answer None while in flight
@@ -3246,6 +3253,21 @@ class SB:
             self._snap()                           # only snap here when it didn't,
         self.buf = self.buf[:self.pos] + s + self.buf[self.pos:]; self.pos += len(s)
 
+
+    def _stash_draft(self) -> None:
+        if self.buf:
+            self._snap()
+            self._draft_stash = self.buf
+            self.buf = ''; self.pos = 0
+            self._hi = -1; self._hist_stash = ''; self._sel = None
+            self._redo.clear()
+        elif self._draft_stash:
+            self._snap()
+            self.buf = self._draft_stash; self.pos = len(self.buf)
+            self._draft_stash = ''
+            self._hi = -1; self._hist_stash = ''; self._sel = None
+            self._redo.clear()
+
     def _placeholder_at(self, side: str) -> tuple[int, int, int] | None:
         """If a paste placeholder sits flush against the caret, return
         (start, end, sid).  `side='left'` → the placeholder *ends* at the caret
@@ -4409,6 +4431,8 @@ class SB:
                     self._palette_sel = max(0, self._palette_sel - 1)
                 else:
                     self._sel = None; self._cur_v(-1)
+            elif o == 0x13:                       # Ctrl+S stash/restore draft
+                self._stash_draft()
             elif o == 0x0e:                       # ↓ visual-row down (history at bottom)
                 if self._palette_visible():
                     n = len(self._cmd_matches(self.buf))
