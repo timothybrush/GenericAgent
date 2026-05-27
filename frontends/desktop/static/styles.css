@@ -449,7 +449,7 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 /* ============ ① 侧边栏（立体卡片 · 美术重点）============ */
 .sidebar{
   width:232px; flex:0 0 232px; background:var(--panel);
-  border-right:1px solid var(--line); border-radius:0; box-shadow:none;
+  border-right:none; border-radius:0; box-shadow:none;
   overflow:hidden; display:flex; flex-direction:column;
   padding:14px 12px;
   transition:width .2s, padding .2s, opacity .15s, flex .2s;
@@ -488,7 +488,7 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 }
 .nav-item.active .beta{ background:var(--card); }
 
-.sidebar-foot{ border-top:1px solid var(--line-soft); padding-top:10px; margin-top:8px; }
+.sidebar-foot{ border-top:none; padding-top:10px; margin-top:8px; }
 .foot-row{
   display:flex; justify-content:space-between; align-items:center;
   padding:8px 10px; border-radius:var(--radius-sm); color:var(--txt-2); cursor:pointer;
@@ -505,16 +505,13 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 .main{
   flex:1; display:flex; flex-direction:column; min-width:0;
   background:var(--panel);
-  border-top:1px solid var(--line);
-  border-bottom:1px solid var(--line);
-  border-left:0;
-  border-right:0;
+  border:0;
   border-radius:0; box-shadow:none; overflow:hidden;
 }
 
 .topbar{
   height:46px; flex:0 0 46px; display:flex; align-items:center;
-  justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--line);
+  justify-content:space-between; padding:0 16px; border-bottom:none;
   background:var(--panel);
 }
 .tb-left{ display:flex; align-items:center; gap:14px; font-size:12px; }
@@ -546,7 +543,7 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 
 .chat-tools{
   display:flex; align-items:center; gap:8px; padding:10px 16px;
-  border-bottom:1px solid var(--line-soft);
+  border-bottom:none;
 }
 .chat-tools .spacer{ flex:1; }
 
@@ -563,6 +560,7 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
   position:relative;
   flex:1; overflow:auto; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:14px; padding:24px;
+  border:1px solid var(--line);
 }
 .msg-area.has-msgs .msg-loading{ margin-top:auto; }
 .msg-loading{
@@ -854,7 +852,7 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
 
 .composer{
   position:relative; padding:12px 16px 16px;
-  border-top:1px solid var(--line);
+  border-top:none;
   background:var(--panel);
 }
 .composer-top{ display:flex; gap:8px; margin-bottom:8px; }
@@ -990,7 +988,7 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
 
 .rightpanel{
   width:220px; flex:0 0 220px; background:var(--panel);
-  border-left:1px solid var(--line); border-radius:0; box-shadow:none;
+  border-left:none; border-radius:0; box-shadow:none;
   overflow:hidden; padding:14px 12px;
   display:flex; flex-direction:column; gap:10px;
   transition:width .2s, padding .2s, opacity .15s, flex .2s;
