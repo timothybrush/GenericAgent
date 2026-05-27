@@ -728,10 +728,40 @@ html[data-boot-has-sessions] .chat-start{ display:none !important; }
 /* token 汇总卡 */
 .tok-filter{ display:flex; align-items:center; gap:8px; margin:12px 0; flex-wrap:wrap; }
 .tok-filter label{ font-size:12px; color:var(--muted); }
-.tok-filter input[type="datetime-local"]{
+.tok-date{
   border:1px solid var(--line); border-radius:6px; padding:5px 8px;
-  font-size:12px; background:var(--field-bg); color:var(--txt);
+  font-size:12px; background:var(--field-bg); color:var(--txt); cursor:pointer;
+  width:160px;
 }
+.tok-date:focus{ border-color:var(--blue); outline:none; }
+/* Flatpickr 主题覆盖 — 全部使用项目 CSS 变量 */
+.flatpickr-calendar{
+  background:var(--card) !important; border:1px solid var(--line) !important; border-radius:var(--radius) !important;
+  box-shadow:var(--shadow-pop) !important; font-family:inherit !important; font-size:13px !important;
+}
+.flatpickr-months .flatpickr-month,
+.flatpickr-current-month{ color:var(--txt) !important; fill:var(--txt) !important; font-weight:600 !important; }
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year{ color:var(--txt) !important; background:var(--field-bg) !important; font-weight:600 !important; font-size:13px !important; }
+.flatpickr-weekdays{ background:var(--field-bg) !important; }
+span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
+.flatpickr-day{
+  color:var(--txt) !important; border-radius:6px;
+}
+.flatpickr-day:hover{ background:var(--hover-2) !important; border-color:transparent !important; }
+.flatpickr-day.today{ border-color:var(--blue) !important; }
+.flatpickr-day.selected{ background:var(--blue) !important; color:var(--on-accent) !important; border-color:var(--blue) !important; }
+.flatpickr-day.prevMonthDay,
+.flatpickr-day.nextMonthDay{ color:var(--muted2) !important; }
+.flatpickr-time input,
+.flatpickr-time .flatpickr-am-pm{ color:var(--txt) !important; background:var(--field-bg) !important; }
+.flatpickr-time input:hover,
+.flatpickr-time input:focus{ background:var(--hover-2) !important; }
+.numInputWrapper:hover{ background:var(--hover-2) !important; }
+.flatpickr-months .flatpickr-prev-month,
+.flatpickr-months .flatpickr-next-month{ fill:var(--txt-2) !important; }
+.flatpickr-months .flatpickr-prev-month:hover svg,
+.flatpickr-months .flatpickr-next-month:hover svg{ fill:var(--txt) !important; }
 .tok-reset{
   border:1px solid var(--line); border-radius:6px; padding:5px 10px;
   font-size:12px; background:var(--field-bg); color:var(--muted); cursor:pointer;

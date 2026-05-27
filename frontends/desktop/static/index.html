@@ -8,6 +8,10 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <!-- highlight.js: 代码高亮 -->
 <link id="hljs-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css" crossorigin="anonymous">
+<!-- Flatpickr: 日期选择器 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/zh.js" crossorigin="anonymous"></script>
 <!-- DEV 脚手架(标注模式)：删本行 + 下方 annot.js 一行即可彻底移除 -->
 <link rel="stylesheet" href="annot.css">
 <script>
@@ -192,9 +196,9 @@
             <div class="page-title" data-i18n="page.token.title"></div>
             <div class="tok-filter">
               <label data-i18n="tok.from"></label>
-              <input type="datetime-local" id="tok-since">
+              <input type="text" id="tok-since" class="tok-date" readonly>
               <label data-i18n="tok.to"></label>
-              <input type="datetime-local" id="tok-until">
+              <input type="text" id="tok-until" class="tok-date" readonly>
               <button class="tok-reset" id="tok-reset" data-i18n="tok.reset"></button>
             </div>
             <div class="stat-row">
