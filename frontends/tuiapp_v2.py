@@ -1096,7 +1096,16 @@ class ChatMessage:
     kind: str = "text"   # "text" | "choice"
     choices: list = field(default_factory=list)   # [(label, value), ...]
     on_select: Optional[Callable] = field(default=None, repr=False)
+    # Optional Esc/cancel hook for choice cards. When set, _cancel_choice
+    # invokes this *after* removing the card (used by /scheduler's submit-
+    # confirm card to re-show the picker, mirroring ask_user's free-text
+    # "Esc rolls back to the previous picker" UX).
+    on_cancel: Optional[Callable] = field(default=None, repr=False)
     selected_label: Optional[str] = None
+    # Indices into `choices` that should render pre-ticked when the card first
+    # mounts (multi_choice only). Used by /scheduler so already-running
+    # services show up checked, making "untick = stop" discoverable (bug#4).
+    preselected_indices: list[int] = field(default_factory=list)
     # Optional lazy-render hints for choice pickers with huge option counts
     # (e.g. /continue across thousands of sessions). Default is empty / 0,
     # so every existing call site keeps the eager-mount behavior bit-for-bit.
@@ -3241,6 +3250,14 @@ class GenericAgentTUI(App[None]):
             self.query_one("#input", InputArea).focus()
         except Exception:
             pass
+        # ask_user-style rollback hook: if the card declared an on_cancel
+        # callable (e.g. /scheduler submit-confirm wants Esc to re-show the
+        # picker), fire it after the card is gone.
+        cb = getattr(msg, "on_cancel", None)
+        if cb is not None:
+            try: cb()
+            except Exception as e:
+                self._system(f"on_cancel 异常: {type(e).__name__}: {e}")
 
     def _finalize_multi_choice(self, msg: ChatMessage, indices: list[int]) -> None:
         """User pressed Enter on a MultiChoiceList.
@@ -3263,8 +3280,13 @@ class GenericAgentTUI(App[None]):
             return
         labels = [lbl for lbl, _ in picked]
         values = [val for _, val in picked]
-        joined = "; ".join(labels)
-        if not labels: return  # nothing selected → keep the picker up
+        # Empty selection: for default ask_user multi-mode this means "nothing
+        # picked yet" → keep the picker up.  But a picker *owner* (on_select set,
+        # e.g. /scheduler) treats an empty set as a deliberate action — namely
+        # "stop everything that was preselected" — so we must let it through.
+        if not labels and msg.on_select is None:
+            return  # nothing selected → keep the picker up
+        joined = "; ".join(labels) if labels else "（无 / none）"
         question = msg.content.split("    ")[0].rstrip() if "    " in msg.content else msg.content
         msg.selected_label = f"{question} → {joined}"
         msg.content = msg.selected_label
@@ -4043,62 +4065,129 @@ class GenericAgentTUI(App[None]):
         # sche_tasks/*.json are read-only — shown below as a system advisory
         # so the user still has visibility, but they can't be launched here.
         services = slash_cmds.list_launchable_services()
-        sched = slash_cmds.list_scheduler_tasks()
         if not services:
             self._system("📋 没有可启动的服务（reflect/*.py 与 frontends/*app*.py 均为空）"); return
+        # bug#4: query what's actually alive *now* (psutil cmdline scan) so the
+        # picker can (a) pre-tick running services and (b) tag them visibly.
+        # Unticking a pre-ticked row therefore reads as "stop this service".
+        try:
+            running = slash_cmds.running_services()  # {name: pid}
+        except Exception:
+            running = {}
         # Mirror hub.pyw: reflect tasks + frontend apps, grouped by kind so the
         # picker reads like the GUI launcher.  Picker value = hub-style path.
         choices = []
+        preselected = []   # indices into `choices` that are running right now
         for kind in ("reflect", "frontend"):
             for s in (svc for svc in services if svc["kind"] == kind):
                 doc = f"  — {s['doc']}" if s["doc"] else ""
-                choices.append((f"{s['name']}{doc}", s["name"]))
+                tag = "  ● running" if s["name"] in running else ""
+                if s["name"] in running:
+                    preselected.append(len(choices))
+                choices.append((f"{s['name']}{doc}{tag}", s["name"]))
         sess = self.current
+        hint = ("📋 选择要启动的服务（与 hub.pyw 一致：reflect 任务 + frontend 应用）"
+                "    Space 勾选 · Enter 提交 · Esc 取消 — 提交后还需二次确认")
+        if running:
+            hint += f"\n   ● = 正在运行（已勾选）；取消勾选即停止该服务（共 {len(running)} 个在运行）"
         msg = ChatMessage(
             role="system",
-            content=("📋 选择要启动的服务（与 hub.pyw 一致：reflect 任务 + frontend 应用）"
-                     "    Space 勾选 · Enter 提交 · Esc 取消 — 提交后还需二次确认"),
+            content=hint,
             kind="multi_choice",
             choices=choices,
-            on_select=lambda names: self._scheduler_confirm(names),
+            preselected_indices=preselected,
+            on_select=lambda names, base=dict(running): self._scheduler_confirm(names, base),
         )
         sess.messages.append(msg)
-        # Cron tasks as a separate read-only advisory line.
-        if sched:
-            lines = ["⏰ sche_tasks/ cron 任务（只读，由 scheduler daemon 调度）："]
-            for s in sched:
-                tag = "" if s["enabled"] else " [DISABLED]"
-                sch = f"  [{s['schedule']}]" if s["schedule"] else ""
-                lines.append(f"  • {s['name']}{sch}{tag}")
-            self._system("\n".join(lines))
         self._refresh_messages()
 
-    def _scheduler_confirm(self, names: list[str]) -> None:
-        """Picker submitted → ask one more `commit answer` confirmation card
-        before actually launching anything (user-requested safety step)."""
-        if not names:
-            self._system("（未选择任何服务）"); return
+    def _scheduler_diff(self, selected: list[str], running: dict) -> tuple[list[str], list[str]]:
+        """Translate the picker's *final tick state* into actions relative to
+        the running baseline (bug#4):
+          starts = ticked but not currently running
+          stops  = currently running but unticked
+        Order is preserved from `selected`/`running` for stable summaries."""
+        sel = list(dict.fromkeys(selected))  # dedupe, keep order
+        run_names = list(running.keys())
+        starts = [n for n in sel if n not in running]
+        stops = [n for n in run_names if n not in sel]
+        return starts, stops
+
+    def _scheduler_confirm(self, names: list[str], running: dict | None = None) -> None:
+        """Picker submitted → ask one more ask_user-style submit-confirm card
+        before actually launching/stopping anything (user-requested safety).
+
+        UX mirrors `ask_user`'s `Ready to submit your answer?` confirmation:
+          - No ✅ glyph on the choice labels (style consistency).
+          - ←/→ Enter Esc hint in the title.
+          - Esc / "Edit selection" → re-open the picker (rollback to previous
+            screen) just like Esc rolls back free-text typing to the picker.
+        bug#4: the card now spells out the *diff* (start X / stop Y) so the
+        consequence of unticking a running service is explicit before commit.
+        """
+        running = running or {}
+        starts, stops = self._scheduler_diff(names, running)
+        if not starts and not stops:
+            self._system("（选择无变化 — 没有要启动或停止的服务）"); return
         sess = self.current
         if sess is None: return
-        joined = "、".join(names)
+        lines = []
+        if starts:
+            lines.append(f"▶ 启动 {len(starts)} 个: " + "、".join(starts))
+        if stops:
+            lines.append(f"■ 停止 {len(stops)} 个: " + "、".join(stops))
+        detail = "\n".join("   " + ln for ln in lines)
         confirm = ChatMessage(
             role="system",
-            content=(f"⚠️ 确认启动以下 {len(names)} 个服务？\n  {joined}"
-                     "    ←/→ 选择 · Enter 确认 · Esc 取消"),
+            content=(f"Ready to submit your selection?\n{detail}"
+                     "\n    ←/→ 选择 · Enter 确认 · Esc 回退"),
             kind="choice",
-            choices=[("✅ 确认启动", "__SCHED_GO__"), ("取消", "__SCHED_CANCEL__")],
-            on_select=lambda v, ns=list(names): self._scheduler_commit(v, ns),
+            choices=[("Submit", "__SCHED_GO__"), ("Edit selection", "__SCHED_EDIT__")],
+            on_select=lambda v, st=list(starts), sp=list(stops): self._scheduler_commit(v, st, sp),
+            # Esc on the confirm card → roll back to the picker (ask_user style).
+            on_cancel=lambda: self._cmd_scheduler([], ""),
         )
         sess.messages.append(confirm)
         self._refresh_messages()
 
-    def _scheduler_commit(self, value: str, names: list[str]) -> str:
-        """on_select for the commit-answer card; returns the breadcrumb text
-        shown after the card collapses (see _collapse_choice)."""
+    def _scheduler_commit(self, value: str, starts: list[str], stops: list[str]) -> str:
+        """on_select for the submit-confirm card; returns the breadcrumb text
+        shown after the card collapses (see _collapse_choice).
+
+        - Submit (__SCHED_GO__) → apply the start/stop diff.
+        - Edit selection (__SCHED_EDIT__) → re-open the picker (rollback).
+        """
+        if value == "__SCHED_EDIT__":
+            # Re-show the picker on the next tick so the breadcrumb settles
+            # first; using call_after_refresh keeps message order stable.
+            try:
+                self.call_after_refresh(self._cmd_scheduler, [], "")
+            except Exception:
+                self._cmd_scheduler([], "")
+            return "已回到选择界面"
         if value != "__SCHED_GO__":
-            return "已取消，未启动任何服务"
-        self._launch_service_batch(names)
-        return f"已确认 — 提交启动 {len(names)} 个服务"
+            return "已取消，未改动任何服务"
+        self._apply_scheduler_diff(starts, stops)
+        bits = []
+        if starts: bits.append(f"启动 {len(starts)}")
+        if stops: bits.append(f"停止 {len(stops)}")
+        return "已确认 — " + "、".join(bits) if bits else "已确认（无改动）"
+
+    def _apply_scheduler_diff(self, starts: list[str], stops: list[str]) -> None:
+        """Run the start/stop actions and print one ✅/❌ summary block.
+        Stops run first so a restart (stop+start of the same name) can't race
+        the cmdline scan — though the diff never produces such a pair."""
+        from frontends import slash_cmds
+        lines = []
+        for name in stops:
+            ok, detail = slash_cmds.stop_service(name)
+            lines.append(("■ " if ok else "❌ ") + detail)
+        for name in starts:
+            ok, detail = slash_cmds.start_service(name)
+            lines.append(("▶ " if ok else "❌ ") + detail)
+        if not lines:
+            lines = ["（无改动）"]
+        self._system("调度变更结果:\n" + "\n".join(lines))
 
     def _launch_service_batch(self, names: list[str]) -> None:
         """Shared by `/scheduler start ...` (CLI) and the confirmed picker.
@@ -5022,7 +5111,11 @@ class GenericAgentTUI(App[None]):
                 # Index into m.choices is preserved as the Selection value, so
                 # the submit handler can recover labels — including the free-
                 # text option, treated as a "drop everything and type" trigger.
-                widget = MultiChoiceList(m, *(Selection(cl, idx) for idx, (cl, _) in enumerate(m.choices)),
+                # `initial_state=True` for indices already running (bug#4) so
+                # the card opens with them ticked → unticking == "stop this".
+                _pre = set(m.preselected_indices or [])
+                widget = MultiChoiceList(m, *(Selection(cl, idx, idx in _pre)
+                                              for idx, (cl, _) in enumerate(m.choices)),
                                          classes="picker")
             else:
                 if m.lazy_choice_items:

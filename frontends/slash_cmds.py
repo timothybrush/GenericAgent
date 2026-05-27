@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -286,7 +287,7 @@ def start_service(name: str) -> tuple[bool, str]:
         flags = 0
         if os.name == "nt":
             flags = 0x00000200 | 0x08000000  # NEW_PROCESS_GROUP | NO_WINDOW
-        subprocess.Popen(
+        proc = subprocess.Popen(
             svc["cmd"],
             cwd=str(_ROOT),
             creationflags=flags,
@@ -295,9 +296,118 @@ def start_service(name: str) -> tuple[bool, str]:
             stderr=subprocess.DEVNULL,
             close_fds=True,
         )
-        return True, f"已启动 {svc['name']}"
+        # Poll-and-confirm: if the child dies immediately (bad path, import
+        # error, port-in-use, etc) Popen still returns happily — without this
+        # check the picker would tick "✅ started" while nothing is running,
+        # which is exactly the bug#4 the user hit.  0.4s is the smallest
+        # window that catches "explodes at import" without making the UI
+        # feel laggy on healthy starts.
+        time.sleep(0.4)
+        rc = proc.poll()
+        if rc is not None:
+            return False, f"启动失败 (退出码 {rc}): {svc['name']}"
+        return True, f"已启动 {svc['name']} (pid={proc.pid})"
     except Exception as e:
         return False, f"启动失败: {type(e).__name__}: {e}"
+
+
+# ----- running-state introspection (bug#4) --------------------------------
+# Why psutil cmdline-scan instead of a launched-by-us pid registry?
+#   • Services launched by a previous TUI run, or by hub.pyw, must also be
+#     recognised — otherwise /scheduler would happily start a duplicate.
+#   • A registry tied to this process dies when the TUI restarts, but the
+#     services keep running (CREATE_NEW_PROCESS_GROUP).  Cmdline scan is the
+#     only single source of truth across launchers, surviving restarts.
+# Trade-off: it costs ~30ms per /scheduler open, and matches by cmdline tail,
+# so two checkouts of GA can collide.  We accept that — running two GAs out
+# of two clones is already an unsupported configuration.
+
+def _match_service(cmdline: list[str], svc: dict) -> bool:
+    """Does this OS process belong to `svc`?  Match on the trailing script
+    arg (`reflect/foo.py` for reflect tasks, `frontends/bar.py` for apps),
+    which is invariant across `python` vs `pythonw` vs venv shims."""
+    if not cmdline:
+        return False
+    rel = svc["name"]  # 'reflect/foo.py' | 'frontends/bar.py'
+    if svc["kind"] == "reflect":
+        # agentmain.py --reflect reflect/foo.py
+        has_main = any("agentmain.py" in (a or "") for a in cmdline)
+        has_rel = any(rel.replace("/", os.sep) in (a or "") or rel in (a or "")
+                      for a in cmdline)
+        return has_main and has_rel
+    # frontend: either `python frontends/foo.py` or `python -m streamlit run frontends/stapp.py …`
+    return any(rel.replace("/", os.sep) in (a or "") or rel in (a or "")
+               for a in cmdline)
+
+
+def running_services() -> dict[str, int]:
+    """Return {service_name: pid} for every launchable service currently
+    alive on this host.  Empty dict if psutil isn't installed (degrades to
+    "/scheduler can't show running marks" rather than crashing the TUI).
+    """
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return {}
+    svcs = list_launchable_services()
+    out: dict[str, int] = {}
+    me = os.getpid()
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            if proc.info["pid"] == me:
+                continue
+            nm = (proc.info.get("name") or "").lower()
+            # cheap pre-filter: only python-ish processes
+            if "python" not in nm and "py.exe" not in nm:
+                continue
+            cmd = proc.info.get("cmdline") or []
+            for svc in svcs:
+                if svc["name"] in out:
+                    continue
+                if _match_service(cmd, svc):
+                    out[svc["name"]] = proc.info["pid"]
+                    break
+        except Exception:
+            # psutil races (proc died mid-iter) are normal; skip silently.
+            continue
+    return out
+
+
+def stop_service(name: str) -> tuple[bool, str]:
+    """Terminate the service `name` if running.  Returns (ok, message).
+
+    Sends SIGTERM-equivalent (Popen.terminate on Windows = TerminateProcess),
+    waits up to 3s, then escalates to kill.  Also reaps obvious children
+    (e.g. `python -m streamlit` spawns the actual streamlit worker) so we
+    don't leave orphans behind.
+    """
+    try:
+        import psutil  # type: ignore
+    except Exception:
+        return False, "未安装 psutil，无法停止服务"
+    running = running_services()
+    pid = running.get(name)
+    if pid is None:
+        return False, f"{name} 未在运行"
+    try:
+        parent = psutil.Process(pid)
+        kids = parent.children(recursive=True)
+        for p in [parent, *kids]:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        gone, alive = psutil.wait_procs([parent, *kids], timeout=3.0)
+        for p in alive:
+            try:
+                p.kill()
+            except Exception:
+                pass
+        return True, f"已停止 {name} (pid={pid})"
+    except psutil.NoSuchProcess:
+        return True, f"{name} 已退出"
+    except Exception as e:
+        return False, f"停止失败: {type(e).__name__}: {e}"
 
 
 def list_scheduler_tasks() -> list[dict]:
