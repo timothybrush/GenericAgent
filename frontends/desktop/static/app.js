@@ -1338,6 +1338,23 @@ function refreshEmptyState(sess) {
 function stripAttachPlaceholders(text) {
   return String(text || '').replace(/\[(Image|File)\s+#\d+\]\s*/g, '').trim();
 }
+// 把消息文本里的 [Image #N]/[File #N] 占位符“按原位置”渲染成内联 chip(显示文件名),其余文本转义+换行,
+// 这样消息里能看到附件在文本中的位置(卡片/缩略图照常另外渲染)。lookup(kind,n) 取该附件文件名。
+// 同时兜底去掉内联的本地上传路径(历史/conductor 回显)。
+function renderMsgTextWithChips(text, lookup) {
+  const s = String(text || '').replace(/[^\s]*desktop_uploads[^\s]*\s*/g, '');
+  const esc = t2 => escapeHtml(t2).replace(/\n/g, '<br>');
+  const re = /\[(Image|File)\s+#(\d+)\]/g;
+  let out = '', last = 0, m;
+  while ((m = re.exec(s))) {
+    out += esc(s.slice(last, m.index));
+    const name = (lookup && lookup(m[1], Number(m[2]))) || (m[1] === 'Image' ? 'image' : 'file');
+    out += `<span class="ph-chip" contenteditable="false">${escapeHtml(name)}</span>`;
+    last = re.lastIndex;
+  }
+  out += esc(s.slice(last));
+  return out.trim();
+}
 function fileSubLabel(name) {
   const m = String(name || '').match(/\.([^.]+)$/);
   if (!m) return t('file.kindGeneric');
@@ -1373,8 +1390,11 @@ function msgNode(msg) {
           return `<div class="file-chip" data-path="${escapeHtml(f.path || '')}" data-name="${escapeHtml(name)}"><span class="fc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span><span class="fc-meta"><span class="fc-name">${escapeHtml(name)}</span><span class="fc-sub">${escapeHtml(sub)}</span></span></div>`;
         }).join('')}</div>`
       : '';
-    const cleanText = stripAttachPlaceholders(shown);
-    const textHtml = cleanText ? `<div class="bubble">${escapeHtml(cleanText)}</div>` : '';
+    const chipText = renderMsgTextWithChips(shown, (kind, n) => {
+      const hit = (kind === 'Image' ? (msg.images || []) : (msg.files || [])).find(x => x.id === 'f-' + n);
+      return hit && (hit.name || '');
+    });
+    const textHtml = chipText ? `<div class="bubble">${chipText}</div>` : '';
     el.innerHTML = `<div class="user-stack">${filesHtml}${imgsHtml}${textHtml}</div>`;
   }
   else if (msg.role === 'assistant') {
@@ -2705,6 +2725,7 @@ bindComposerUpload('collab');
 Object.assign(window, {
   gaSetActiveFileComposer: ctx => { activeFileComposer = ctx === 'collab' ? 'collab' : 'chat'; },
   gaExpandFilePlaceholders: expandFilePlaceholders,
+  gaRenderMsgChips: renderMsgTextWithChips,
   gaCollectUsedFiles: collectUsedFiles,
   gaComposerText: composerText,
   gaClearUsedPendingFiles: text => removeUsedPendingFiles(collectUsedFiles(text)),
@@ -3514,7 +3535,10 @@ window.ga.startBridge && window.ga.startBridge();
   const t = k => (window.gaT && window.gaT(k)) || k;
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const md = s => { try { return typeof marked !== 'undefined' ? marked.parse(s || '') : esc(s); } catch { return esc(s); } };
-  const stripAttach = text => String(text || '').replace(/\[(Image|File)\s+#\d+\]\s*/g, '').trim();
+  const stripAttach = text => String(text || '')
+    .replace(/\[(Image|File)\s+#\d+\]\s*/g, '')
+    .replace(/[^\s]*desktop_uploads[^\s]*\s*/g, '')  // 兜底:去掉内联的本地上传路径,避免历史/回显消息把全路径甩出来
+    .trim();
   const FC_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
   const ST_ICONS = {
     running: '<span class="collab-st-ic collab-st-ic--spin" aria-hidden="true"></span>',
@@ -3689,8 +3713,13 @@ window.ga.startBridge && window.ga.startBridge();
       const name = f.name || 'file';
       return `<div class="file-chip" data-path="${esc(f.path || '')}" data-name="${esc(name)}"><span class="fc-icon">${FC_SVG}</span><span class="fc-meta"><span class="fc-name">${esc(name)}</span><span class="fc-sub">${esc(sub(name))}</span></span></div>`;
     }).join('');
-    const clean = stripAttach(item.msg);
-    const text = clean ? `<div class="bubble">${esc(clean).replace(/\n/g, '<br>')}</div>` : '';
+    const chipText = window.gaRenderMsgChips
+      ? window.gaRenderMsgChips(item.msg, (kind, n) => {
+          const hit = (kind === 'Image' ? (item.images || []) : (item.files || [])).find(x => x.sid === n);
+          return hit && (hit.name || '');
+        })
+      : esc(stripAttach(item.msg));
+    const text = chipText ? `<div class="bubble">${chipText}</div>` : '';
     return `<div class="msg user collab-msg-enter"><div class="user-stack">${files ? `<div class="user-files">${files}</div>` : ''}${imgs ? `<div class="user-imgs">${imgs}</div>` : ''}${text}</div></div>`;
   }
 
@@ -3732,11 +3761,21 @@ window.ga.startBridge && window.ga.startBridge();
     if (item.id && S.messages.some(m => m.id === item.id)) return;
     if (item.role === 'user') {
       const plain = stripAttach(item.msg);
+      const expand = window.gaExpandFilePlaceholders;
       for (let i = S.messages.length - 1; i >= 0; i--) {
         const m = S.messages[i];
-        if (m._local && m.role === 'user' && (stripAttach(m.msg) === plain || m.msg === item.msg)) {
-          S.messages.splice(i, 1);
-          break;
+        // 服务端回显的 msg 是 expand(本地文本)（附件被展开成了本地路径），和本地乐观消息其实是同一条。
+        // 命中后保留本地那条的干净显示（占位符 msg + 结构化 files/images 卡片），只补服务端 id/ts，
+        // 丢弃带路径的回显文本 —— 既去重、又不丢卡片、不外露本地路径，与 chat 显示一致。
+        if (m._local && m.role === 'user' &&
+            (stripAttach(m.msg) === plain || m.msg === item.msg || (expand && expand(m.msg) === item.msg))) {
+          m.id = item.id || m.id;
+          if (item.ts != null) m.ts = item.ts;
+          if (item.read != null) m.read = item.read;
+          m._local = false;
+          syncMessages();
+          setConnUi();
+          return;
         }
       }
     }
@@ -3832,7 +3871,7 @@ window.ga.startBridge && window.ga.startBridge();
     const clearUsed = window.gaClearUsedPendingFiles || (() => {});
     const used = collect(text);
     const images = [], files = [];
-    for (const f of used) (f.isImage ? images : files).push(f.isImage ? { path: f.path, dataUrl: f.dataUrl } : { path: f.path, name: f.name });
+    for (const f of used) (f.isImage ? images : files).push(f.isImage ? { path: f.path, dataUrl: f.dataUrl, name: f.name, sid: f.sid } : { path: f.path, name: f.name, sid: f.sid });
     S.messages.push({ id: `_local_${++localSeq}`, _local: true, role: 'user', msg: text, ts: Date.now() / 1000, images, files });
     S.conductorTyping = true;
     syncMessages();
