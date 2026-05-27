@@ -1204,11 +1204,11 @@ function postRenderEnhance(containerEl) {
     const src = el.querySelector('annotation[encoding="application/x-tex"]');
     if (!src) return;
     const btn = document.createElement('button');
-    btn.className = 'latex-copy-btn'; btn.innerHTML = SVG_COPY_ICON;
+    btn.className = 'latex-copy-btn'; btn.textContent = '\u29C9';
     btn.title = t('act.copyTex');
     btn.onclick = () => {
       navigator.clipboard.writeText(src.textContent).then(() => {
-        btn.innerHTML = SVG_CHECK_ICON; setTimeout(() => btn.innerHTML = SVG_COPY_ICON, 1500);
+        btn.textContent = '\u2713'; setTimeout(() => btn.textContent = '\u29C9', 1500);
       });
     };
     el.style.position = 'relative';
