@@ -509,7 +509,9 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll('[data-i18n-ph]').forEach(el => {
     const phKey = el.dataset.i18nPh;
-    el.setAttribute('placeholder', el.hasAttribute('data-optional-ph') ? optionalPh(phKey) : t(phKey));
+    const val = el.hasAttribute('data-optional-ph') ? optionalPh(phKey) : t(phKey);
+    if (el.isContentEditable) el.setAttribute('data-ph', val);  // contenteditable 用 :empty::before 显示
+    else el.setAttribute('placeholder', val);
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
   renderLangList();
@@ -1513,7 +1515,7 @@ function setMsgLoading(on) {
 
 function setComposerLocked(on) {
   if (composerEl) composerEl.classList.toggle('is-locked', !!on);
-  if (inputEl) inputEl.readOnly = !!on;
+  if (inputEl) inputEl.contentEditable = on ? 'false' : 'true';  // contenteditable 无 readOnly,改切 contentEditable
   if (sendBtn) {
     sendBtn.disabled = !!on;
     sendBtn.classList.toggle('is-busy', !!on);
@@ -1626,11 +1628,10 @@ async function cancelPrompt() {
 /* ═══════════════ 输入区 / slash / 预设 ═══════════════ */
 async function submitInput() {
   if (_submitInFlight) return;
-  const text = inputEl.value;
+  const text = composerText();
   if (!text.trim()) return;
   if (text.trim().startsWith('/')) {
-    inputEl.value = '';
-    inputEl.style.height = 'auto';
+    inputEl.innerHTML = '';
     handleSlash(text.trim());
     return;
   }
@@ -1639,8 +1640,7 @@ async function submitInput() {
   try {
     const sent = await sendPrompt(text);
     if (sent) {
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
+      inputEl.innerHTML = '';
     }
   } finally {
     _submitInFlight = false;
@@ -1654,13 +1654,12 @@ sendBtn.addEventListener('click', (e) => {
   submitInput();
 });
 inputEl.addEventListener('keydown', (e) => {
-  if (atomicPlaceholderDelete(e)) return;  // #2 紧邻占位符时整块删除
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submitInput(); }
 });
 inputEl.addEventListener('input', () => {
-  inputEl.style.height = 'auto';
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
-  reconcilePendingFiles();  // #1 占位符被删/改坏 → 同步清理附件
+  // 清空后浏览器可能残留 <br>，抹掉以便 :empty 占位提示生效
+  if (!inputEl.textContent.trim() && !inputEl.querySelector('.ph-chip')) inputEl.innerHTML = '';
+  reconcilePendingFiles();  // chip 被原子删除 → 同步清理附件 + 删磁盘文件
 });
 function showSystem(text) {
   const sess = activeSess(); if (!sess) return;
@@ -2045,27 +2044,60 @@ function renderThumbStrip() {
   applyI18n();
 }
 
-function insertPlaceholderInComposer(marker) {
+// 在光标处插入一个原子附件 chip（contenteditable=false → 整体、删不进中间，像 @人）
+function insertPlaceholderInComposer(file) {
   if (!inputEl) return;
-  const start = inputEl.selectionStart ?? inputEl.value.length;
-  const end = inputEl.selectionEnd ?? inputEl.value.length;
-  const before = inputEl.value.slice(0, start);
-  const after = inputEl.value.slice(end);
-  const needSpace = before && !/\s$/.test(before);
-  const insertion = (needSpace ? ' ' : '') + marker + ' ';
-  inputEl.value = before + insertion + after;
-  const caret = (before + insertion).length;
-  inputEl.setSelectionRange(caret, caret);
-  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+  const chip = document.createElement('span');
+  chip.className = 'ph-chip';
+  chip.setAttribute('contenteditable', 'false');
+  chip.dataset.sid = String(file.sid);
+  chip.dataset.kind = file.isImage ? 'image' : 'file';
+  chip.textContent = (file.isImage ? '🖼 ' : '📎 ') + (file.name || 'file');
   inputEl.focus();
+  const sel = window.getSelection();
+  let range;
+  if (sel && sel.rangeCount && inputEl.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    range = sel.getRangeAt(0);
+  } else {
+    range = document.createRange(); range.selectNodeContents(inputEl); range.collapse(false);
+  }
+  range.deleteContents();
+  range.insertNode(chip);
+  const sp = document.createTextNode(' ');  // chip 后补一个空格，便于继续打字 / 定位光标
+  chip.after(sp);
+  range.setStartAfter(sp); range.collapse(true);
+  if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+  inputEl.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// 按 sid 移除 chip（连同紧邻的一个空格）
 function removePlaceholderFromComposer(file) {
   if (!inputEl) return;
-  const marker = placeholderFor(file);
-  const re = new RegExp('\\s?' + marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s?', '');
-  inputEl.value = inputEl.value.replace(re, ' ').replace(/  +/g, ' ').trim();
+  const chip = inputEl.querySelector(`.ph-chip[data-sid="${file.sid}"]`);
+  if (!chip) return;
+  const next = chip.nextSibling;
+  if (next && next.nodeType === 3) next.nodeValue = next.nodeValue.replace(/^[\s ]/, '');
+  chip.remove();
   inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// 读取 composer 内容为纯文本：chip → [Image #N]/[File #N]，<br>/<div> → 换行
+function composerText() {
+  const ser = (node, first) => {
+    if (node.nodeType === 3) return node.nodeValue;
+    if (node.nodeType !== 1) return '';
+    if (node.classList && node.classList.contains('ph-chip')) {
+      const kind = node.dataset.kind === 'image' ? 'Image' : 'File';
+      return `[${kind} #${node.dataset.sid}]`;
+    }
+    if (node.tagName === 'BR') return '\n';
+    let inner = '';
+    node.childNodes.forEach(c => { inner += ser(c, false); });
+    return (first ? '' : '\n') + inner;  // DIV/P 视为换行
+  };
+  let out = '';
+  inputEl.childNodes.forEach((n, i) => { out += ser(n, i === 0); });
+  return out.replace(/ /g, ' ');  // nbsp → 普通空格
 }
 
 function expandFilePlaceholders(text) {
@@ -2100,42 +2132,15 @@ function removePendingFile(sid, { stripPlaceholder = false } = {}) {
     }).catch(() => {});
   }
 }
-// 文本里现存的"完整有效"占位符的 sid 集合
-function placeholderSidsInText(text) {
-  const ids = new Set(); const re = /\[(?:Image|File) #(\d+)\]/g; let m;
-  while ((m = re.exec(text)) !== null) ids.add(Number(m[1]));
-  return ids;
-}
-// #1 对账:占位符被删掉或改坏 → 同步移除对应附件(缩略图 + 磁盘文件)
+// #1 对账:DOM 里 chip 没了(被原子删除/退格整块删)→ 同步移除附件 + 删磁盘文件
 function reconcilePendingFiles() {
   if (!state.pendingFiles.length) return;
-  const present = placeholderSidsInText(inputEl.value);
+  const present = new Set(
+    [...inputEl.querySelectorAll('.ph-chip[data-sid]')].map(c => Number(c.dataset.sid))
+  );
   for (const f of state.pendingFiles.filter(x => !present.has(x.sid))) {
     removePendingFile(f.sid, { stripPlaceholder: false });
   }
-}
-// #2 原子删除:光标紧邻占位符时 Backspace/Delete 整块删(连同文件),杜绝"删一半"
-function atomicPlaceholderDelete(e) {
-  if (e.key !== 'Backspace' && e.key !== 'Delete') return false;
-  if (inputEl.selectionStart !== inputEl.selectionEnd) return false; // 有选区交给默认行为 + 对账兜底
-  const pos = inputEl.selectionStart;
-  const val = inputEl.value;
-  const re = /\[(?:Image|File) #(\d+)\]/g; let m;
-  while ((m = re.exec(val)) !== null) {
-    const start = m.index, end = start + m[0].length, sid = Number(m[1]);
-    const hit = e.key === 'Backspace' ? end === pos : start === pos;
-    if (!hit) continue;
-    e.preventDefault();
-    let s = start, eOut = end;             // 顺带吃掉紧邻的一个空格,避免残留双空格
-    if (e.key === 'Backspace' && val[s - 1] === ' ') s -= 1;
-    else if (e.key === 'Delete' && val[eOut] === ' ') eOut += 1;
-    inputEl.value = val.slice(0, s) + val.slice(eOut);
-    inputEl.setSelectionRange(s, s);
-    removePendingFile(sid, { stripPlaceholder: false });
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  }
-  return false;
 }
 
 async function uploadOne(name, dataUrl, sid) {
@@ -2188,7 +2193,7 @@ async function addFiles(fileList) {
         dataUrl: isImage ? dataUrl : '',
       };
       state.pendingFiles.push(entry);
-      insertPlaceholderInComposer(placeholderFor(entry));
+      insertPlaceholderInComposer(entry);
       renderThumbStrip();
     } catch (e) {
       showChanToast(t('upload.failed'), e.message || String(e), 'err');
@@ -2267,18 +2272,15 @@ if (chatPanel) {
 /* ─── paste file/image into composer ─── */
 if (inputEl) {
   inputEl.addEventListener('paste', (e) => {
-    const items = e.clipboardData && e.clipboardData.items;
-    if (!items) return;
+    const cd = e.clipboardData || window.clipboardData;
+    const items = cd && cd.items;
     const files = [];
-    for (const it of items) {
-      if (it.kind === 'file') {
-        const f = it.getAsFile();
-        if (f) files.push(f);
-      }
-    }
-    if (files.length === 0) return;
+    if (items) for (const it of items) { if (it.kind === 'file') { const f = it.getAsFile(); if (f) files.push(f); } }
+    if (files.length) { e.preventDefault(); addFiles(files); return; }
+    // 富文本粘贴 → 强制纯文本（contenteditable 默认会粘 HTML，会污染输入框）
     e.preventDefault();
-    addFiles(files);
+    const text = cd ? cd.getData('text/plain') : '';
+    if (text) document.execCommand('insertText', false, text);
   });
 }
 
