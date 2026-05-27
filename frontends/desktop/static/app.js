@@ -633,7 +633,7 @@ function applyTheme(id, { persist } = { persist: true }) {
   theme = (n >= 1 && n <= 8) ? String(n) : '1';
   const root = document.documentElement;
   root.dataset.theme = theme;
-  root.style.setProperty('--blue', getComputedStyle(root).getPropertyValue(`--swatch-${theme}`).trim());
+  root.style.setProperty('--accent', getComputedStyle(root).getPropertyValue(`--swatch-${theme}`).trim());
   document.querySelectorAll('#theme-swatches .swatch').forEach(el => {
     el.classList.toggle('sel', el.dataset.theme === theme);
   });
