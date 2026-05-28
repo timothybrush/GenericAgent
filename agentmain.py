@@ -133,6 +133,10 @@ class GenericAgent:
             if raw_query is None:
                 self.task_queue.task_done(); continue
             self.is_running = True
+            if len(raw_query) > 1500:
+                task_file = os.path.join(script_dir, 'temp', f'user_prompt_{int(time.time())}.md')
+                with open(task_file, 'w', encoding='utf-8') as f: f.write(raw_query)
+                raw_query = f'Long user prompt saved to {task_file}. Read and execute.'
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
