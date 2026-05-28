@@ -2542,6 +2542,17 @@ class SB:
                 return i, p - st
         return len(segs) - 1, len(segs[-1][1])
 
+    def _line_region(self, pos: int | None = None) -> tuple[int, int, int, int]:
+        """(行号, 总行数, 行起始偏移, 行结束偏移) 基于逻辑行（\\n分割）"""
+        p = self.pos if pos is None else pos
+        ls = self.buf.rfind('\n', 0, p) + 1
+        le = self.buf.find('\n', p)
+        if le == -1:
+            le = len(self.buf)
+        line_no = self.buf[:p].count('\n')
+        total = self.buf.count('\n') + 1
+        return line_no, total, ls, le
+
     def _cur_v(self, d: int) -> None:
         """↑/↓ roam by VISUAL row (a long single-line paste wraps to many rows
         yet stays one logical line — must still roam). At the top/bottom visual
@@ -5157,7 +5168,15 @@ class SB:
                         self._pending_drain_t = 0.0
                     self._render_live()
                 else:
-                    self._sel = None; self._cur_v(-1)
+                    self._sel = None
+                    line_no, total, ls, le = self._line_region()
+                    if line_no == 0:
+                        if self.pos == ls:
+                            self._nav_hist(-1)
+                        else:
+                            self.pos = ls
+                    else:
+                        self._cur_v(-1)
             elif o == 0x13:                       # Ctrl+S stash/restore draft
                 self._stash_draft()
             elif o == 0x0e:                       # ↓ visual-row down (history at bottom)
@@ -5165,7 +5184,15 @@ class SB:
                     n = len(self._cmd_matches(self.buf))
                     self._palette_sel = min(n - 1, self._palette_sel + 1) if n else 0
                 else:
-                    self._sel = None; self._cur_v(1)
+                    self._sel = None
+                    line_no, total, ls, le = self._line_region()
+                    if line_no == total - 1:
+                        if self.pos == le:
+                            self._nav_hist(1)
+                        else:
+                            self.pos = le
+                    else:
+                        self._cur_v(1)
             elif o == 0x02:                       # ← caret left
                 self._sel = None; self.pos = max(0, self.pos - 1)
             elif o == 0x06:                       # → caret right
