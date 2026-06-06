@@ -1523,6 +1523,7 @@ const msgLoading = document.getElementById('msg-loading');
 const sessionLoadingEl = document.getElementById('session-loading');
 const MIN_MSG_LOADING_MS = 450;
 const HYDRATE_LOADING_TIMEOUT_MS = 10000;
+const POLL_MSG_LIMIT = 200;
 const PLAN_LOST_GRACE_MS = 1500;  // tuiapp_v2._PLAN_LOST_GRACE_SEC
 const PLAN_COMPLETE_GRACE_MS = 3000;  // tuiapp_v2._PLAN_GRACE_SEC
 
@@ -2622,19 +2623,31 @@ function upsert(sess, raw, partial) {
   saveSessions();
 }
 
-/** 首拍拉历史；不等 idle，running 续交给 pollSession */
+async function fetchSessionPoll(sess, opts = {}) {
+  const r = rt(sess);
+  const sid = sess.bridgeSessionId || sess.id;
+  const afterId = opts.after ?? r.lastId ?? 0;
+  const limit = opts.limit ?? POLL_MSG_LIMIT;
+  const res = await window.ga.rpc('session/poll', { sessionId: sid, afterId, limit });
+  if (res?.error) throw new Error(res.error.message || res.error);
+  return res.result || res;
+}
+
+function applyPollResult(sess, result) {
+  for (const msg of (result.messages || [])) upsert(sess, msg, false);
+  if (result.partial) upsert(sess, result.partial, true);
+  const busy = result.status === 'running' || !!result.partial;
+  setBusy(sess, busy);
+  if (isActive(sess)) applyPlanPayload(sess, result.plan);
+  return busy;
+}
+
+/** 拉历史：limit=0 一次拿全量（bridge 不截断）；不等 idle，running 续交给 pollSession */
 async function hydrateSession(sess) {
   try {
-    const r = rt(sess);
-    const res = await window.ga.pollSession(sess.bridgeSessionId || sess.id, r.lastId || 0);
-    if (res?.error) throw new Error(res.error.message || res.error);
-    const result = res.result || res;
-    for (const msg of (result.messages || [])) upsert(sess, msg, false);
-    if (result.partial) upsert(sess, result.partial, true);
-    const busy = result.status === 'running' || !!result.partial;
-    setBusy(sess, busy);
-    if (isActive(sess)) applyPlanPayload(sess, result.plan);
-    if (busy && !r.polling) pollSession(sess);
+    const result = await fetchSessionPoll(sess, { after: 0, limit: 0 });
+    const busy = applyPollResult(sess, result);
+    if (busy && !rt(sess).polling) pollSession(sess);
   } catch (e) {
     showError(t('err.poll') + ': ' + (e.message || e));
     setBusy(sess, false);
@@ -2660,15 +2673,9 @@ async function pollSession(sess) {
   try {
     do {
       try {
-        const res = await window.ga.pollSession(sess.bridgeSessionId || sess.id, r.lastId || 0);
-        if (res?.error) throw new Error(res.error.message || res.error);
+        const result = await fetchSessionPoll(sess);
         consecutiveErrors = 0;
-        const result = res.result || res;
-        for (const msg of (result.messages || [])) upsert(sess, msg, false);
-        if (result.partial) upsert(sess, result.partial, true);
-        const busy = result.status === 'running' || !!result.partial;
-        setBusy(sess, busy);
-        if (isActive(sess)) applyPlanPayload(sess, result.plan);
+        const busy = applyPollResult(sess, result);
         if (busy) await new Promise(z => setTimeout(z, 500));
         else {
           if (r.draftEl) { r.draftEl.remove(); r.draftEl = null; r.draftText = ''; }
