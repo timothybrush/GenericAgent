@@ -42,6 +42,10 @@ def get_system_prompt():
     prompt += get_global_memory()
     return prompt
 
+# SDK:
+# agent = GenericAgent(); threading.Thread(target=agent.run, daemon=True).start()
+# output1_queue = agent.put_task(prompt1)
+# output2_queue = agent.put_task(prompt2)
 class GenericAgent:
     def __init__(self):
         os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
@@ -187,7 +191,7 @@ class GenericAgent:
                 self.task_queue.task_done()
                 if self.handler is not None: self.handler.code_stop_signal.append(1)
 
-GeneraticAgent = GenericAgent    
+GeneraticAgent = GenericAgent
 
 if __name__ == '__main__':
     import argparse

@@ -503,7 +503,7 @@ class GenericAgentHandler(BaseHandler):
             if remaining == 0:
                 self._exit_plan_mode(); yield "[Info] Plan完成：plan.md中0个[ ]残留，退出plan模式。\n"
         
-        yield "[Info] Final response to user.\n"
+        #yield "[Info] Final response to user.\n"
         return StepOutcome(response, next_prompt=None)
     
     def do_start_long_term_update(self, args, response):
