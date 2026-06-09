@@ -25,8 +25,7 @@
 
 </div>
 
-> 📌 **Official Channels** — GenericAgent's official sources are this GitHub repository and the official website: **https://gaagent.ai**.
-> DintalClaw is currently the only officially authorized commercial partner; any other third-party website, organization, or individual using the GenericAgent name is not official unless explicitly listed here.
+> 📌 **Official:** GitHub + https://gaagent.ai only. DintalClaw is the sole authorized commercial partner; others are not affiliated.
 
 ---
 
@@ -360,7 +359,6 @@ GA web tools run through a **real, persistent Chrome/Chromium session** rather t
 | Device & Browser Info bot test | Multiple bot flags | ✅ Human / `isBot=false` | `deviceandbrowserinfo.com` |
 | FingerprintJS bot detection demo | Often detected | ✅ Passed | Demo flow completed without bot verdict |
 | reCAPTCHA v3 demo | Low bot-like score | ✅ 0.9 human-like score | Score-based risk signal; 0.9 is above typical production thresholds |
-| Persistent session | Usually isolated | ✅ Preserved | Reuses the user's real browser profile, cookies, extensions, and login state |
 
 For reCAPTCHA v3, `0.9` is not a "checkbox solved" result; it is the high-confidence human-like score returned by the risk model, typically sufficient to avoid extra challenges in production flows.
 
@@ -740,7 +738,6 @@ GA Web 工具运行在**真实、持久化的 Chrome/Chromium 会话**中，而�
 | Device & Browser Info bot test | 多个 bot 标记 | ✅ Human / `isBot=false` | `deviceandbrowserinfo.com` |
 | FingerprintJS bot detection demo | 常被识别 | ✅ 通过 | Demo 流程完成，未给出 bot 判定 |
 | reCAPTCHA v3 demo | 低分 / bot-like | ✅ 0.9 真人相似分 | v3 是基于分数的风险信号；0.9 高于常见生产阈值 |
-| 持久化会话 | 通常隔离 | ✅ 保留 | 复用用户真实浏览器 profile、Cookie、扩展和登录态 |
 
 对于 reCAPTCHA v3，`0.9` 不是“点过验证码”的结果，而是风控模型返回的高置信真人相似分，通常足以通过生产环境中的常见阈值，避免进入更严格挑战。
 
