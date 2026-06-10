@@ -2776,32 +2776,36 @@ function upsert(sess, raw, partial) {
   if (!m.id || r.seen.has(m.id)) return;
   r.seen.add(m.id); r.lastId = Math.max(r.lastId, m.id);
   if (m.role === 'assistant' && r.draftEl) {
-    // done 收束：final message 的 turn_segs 是最后一次完整 draft 更新。
-    // 收到 done 就强制一次性重建 bubble：所有旧/未冻结 turn 直接冻结，只留下最后一个有效 turn 非冻结。
-    if (Array.isArray(m.turn_segs)) {
-      r.draftSegs = m.turn_segs;
-      r.draftTurn = resolveVisibleTurnIndex(r.draftSegs, m.curr_turn);
-      r.streamTurn = r.draftTurn;
-      if (!r.twState) r.twState = { shown: 0, timer: null };
-      if (r.twState.timer) { clearInterval(r.twState.timer); r.twState.timer = null; }
-      r.twState.turn = r.draftTurn;
-      r.twState.shown = (r.draftSegs[r.draftTurn] || '').length;
-      r.draftRecoverPending = false;
-      if (isActive(sess)) {
-        const bubble = r.draftEl.querySelector('.bubble');
-        if (bubble) bubble.innerHTML = renderAssistantTurnsHtml(r.draftSegs, r.draftTurn, false);
+    // done 收尾:用 final m 原地重画 bubble(保留 ljq 的"复用 draftEl 不闪烁"优化),
+    // 同时彻底丢掉 partial 累积的 DOM——避免 frp 高延迟下漏掉的最后一拍丢字。
+    // assistantTurnSegs(m) 双轨处理 turn_segs/content,跟 msgNode refresh 路径同源。
+    flushTypewriter(sess);
+    const segs = assistantTurnSegs(m);
+    const curr = resolveVisibleTurnIndex(segs, m.curr_turn);
+    r.draftSegs = segs;
+    r.draftTurn = curr;
+    r.streamTurn = curr;
+    if (!r.twState) r.twState = { shown: 0, timer: null };
+    if (r.twState.timer) { clearInterval(r.twState.timer); r.twState.timer = null; }
+    r.twState.turn = curr;
+    r.twState.shown = (segs[curr] || '').length;
+    r.draftRecoverPending = false;
+    if (isActive(sess)) {
+      let bubble = r.draftEl.querySelector(':scope > .bubble.md');
+      if (!bubble) {
+        bubble = document.createElement('div');
+        bubble.className = 'bubble md';
+        r.draftEl.appendChild(bubble);
       }
-    } else {
-      flushTypewriter(sess);
+      bubble.innerHTML = renderAssistantTurnsHtml(segs, curr, false);
+      postRenderEnhance(bubble);
     }
     const cursor = r.draftEl.querySelector('.cursor');
     if (cursor) cursor.remove();
-    // 补齐 elapsed badge（若有 taskStartedAt）
     if (r.taskStartedAt) {
       ensureTaskElapsedBadge(r.draftEl, r.taskStartedAt, r.taskEndedAt || Date.now());
       r.taskStartedAt = null; r.taskEndedAt = null;
     }
-    // 挂 copy 按钮（与 msgNode 一致）
     if (!r.draftEl.querySelector('.bubble-copy-btn')) {
       const copyBtn = document.createElement('button');
       copyBtn.className = 'bubble-copy-btn';
