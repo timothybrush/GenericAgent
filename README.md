@@ -64,7 +64,7 @@ Every time GenericAgent solves a new task, it automatically crystallizes the exe
 | :--- | :--- |
 | 🧬 **Self-Evolving** | Automatically crystallizes each task into a Skill. Capabilities grow with every use, forming your personal skill tree. |
 | 🪶 **Minimal Architecture** | ~3K lines of core code. Agent Loop is ~100 lines. No complex dependencies, zero deployment overhead. |
-| ⚡ **Strong Execution** | Injects into a real browser (preserving login sessions). 9 atomic tools take direct control of the system. |
+| ⚡ **Strong Execution** | **TMWebdriver** injects into a real browser (preserving login sessions). 9 atomic tools take direct control of the system. |
 | 🔌 **High Compatibility** | Supports Claude / Gemini / Kimi / MiniMax and other major models. Cross-platform. |
 | 💰 **Token Efficient** | <30K context window — a fraction of the 200K–1M other agents consume. Less noise, fewer hallucinations, higher success rate, lower cost. |
 
@@ -129,34 +129,37 @@ curl -fsSL https://raw.githubusercontent.com/lsdefine/GenericAgent/refs/heads/ma
 
 ### For Humans
 
-#### Method 1 — One-line install *(recommended)*
-
-This installs GenericAgent with an isolated Python environment and Git, then downloads a ready-to-run package.
-
-**Windows PowerShell**
-
-```powershell
-powershell -ExecutionPolicy Bypass -c "$env:GLOBAL=1; irm http://fudankw.cn:9000/files/ga_install.ps1 | iex"
-```
-
-**Linux / macOS**
-
-```bash
-GLOBAL=1 bash -c "$(curl -fsSL http://fudankw.cn:9000/files/ga_install.sh)"
-```
-
-After installation, launch the desktop app:
-
-- **Windows** — double-click `frontends/GenericAgent.exe`
-- **Linux / macOS** — run `python launch.pyw` from the install directory
-
-#### Method 2 — Python install *(for developers)*
+#### Method 1 — Clone & install *(recommended)*
 
 ```bash
 git clone https://github.com/lsdefine/GenericAgent.git && cd GenericAgent
 uv venv && uv pip install -e ".[ui]"
 cp mykey_template_en.py mykey.py   # fill in your LLM API key
-python launch.pyw
+```
+
+Dependencies are deliberately tiered: the agent core needs only `requests`, plus four lightweight packages (`beautifulsoup4`, `bottle`, `simple-websocket-server`, `aiohttp`) for TMWebdriver's local server. The `[ui]` extra pulls in frontend libraries (Streamlit, `prompt_toolkit`/`rich` for the TUI, …) — install it for the bundled UIs, or skip it entirely and drive the agent headless. No Playwright, no LangChain, no browser binaries to download.
+
+Then launch:
+
+```bash
+python frontends/tui_v3.py   # Terminal UI (recommended)
+python launch.pyw            # Streamlit web UI
+```
+
+#### Method 2 — One-line installer *(convenience)*
+
+Sets up a self-contained directory with an isolated Python environment, Git, and a ready-to-run package. The script is in [`assets/`](assets/) if you'd like to read it first.
+
+**Windows PowerShell**
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "$env:GLOBAL=1; irm https://raw.githubusercontent.com/lsdefine/GenericAgent/main/assets/ga_install.ps1 | iex"
+```
+
+**Linux / macOS**
+
+```bash
+GLOBAL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lsdefine/GenericAgent/main/assets/ga_install.sh)"
 ```
 
 > 💡 GenericAgent grows its environment **through the Agent itself** — don't pre-install everything. See [Unlocking Advanced Capabilities](#-unlocking-advanced-capabilities) below.
@@ -167,20 +170,12 @@ python launch.pyw
 
 ### Frontends
 
-#### Desktop App
+#### Terminal UI *(recommended)*
 
-For one-line installs on Windows, double-click:
-
-```text
-frontends/GenericAgent.exe
-```
-
-#### Terminal UI
-
-A lightweight, keyboard-driven interface built on [Textual](https://github.com/Textualize/textual). Supports multiple concurrent sessions and real-time streaming.
+A lightweight, scrollback-first terminal interface built on `prompt_toolkit` + `rich`. Supports multiple concurrent sessions and real-time streaming.
 
 ```bash
-python frontends/tuiapp_v2.py
+python frontends/tui_v3.py
 ```
 
 <details>
@@ -188,10 +183,10 @@ python frontends/tuiapp_v2.py
 
 TUI rendering on Windows can be flaky depending on terminal + font. Common causes:
 
-1. `textual` is not on the latest version — `pip install -U textual` first.
+1. `prompt_toolkit` / `rich` are not on the latest version — `pip install -U prompt_toolkit rich` first.
 2. PowerShell / cmd ship with terminals that have rough Unicode + key-binding support. **Prefer Git Bash on Windows**, which is much better behaved.
 3. If it still looks broken, ask GA itself to fix it:
-   > *"My experience using `frontends/tuiapp_v2.py` in PowerShell / cmd / Git Bash on Windows is very poor — lots of incompatibility. Please refer to Claude Code's best practices for the Windows terminal and fix all font and rendering incompatibilities."*
+   > *"My experience using `frontends/tui_v3.py` in PowerShell / cmd / Git Bash on Windows is very poor — lots of incompatibility. Please refer to Claude Code's best practices for the Windows terminal and fix all font and rendering incompatibilities."*
 
 </details>
 
@@ -362,9 +357,9 @@ Baselines across these dimensions include **Claude Code**, **OpenAI CodeX**, and
   </tr>
 </table>
 
-### Browser Realness of GA Web Tools
+### Browser Realness of GA Web Tools (TMWebdriver)
 
-GA web tools run through a **real, persistent Chrome/Chromium session** rather than a disposable headless sandbox, preserving cookies, login state, extensions, GPU/WebGL behavior, and normal browser-session fingerprints.
+GA web tools are powered by **TMWebdriver** — a local WebSocket server plus a Chrome extension — running through a **real, persistent Chrome/Chromium session** rather than a disposable headless sandbox, preserving cookies, login state, extensions, GPU/WebGL behavior, and normal browser-session fingerprints.
 
 | Detection Service / Signal | Vanilla Headless Automation | GA Web Tools | Notes |
 | :--- | :---: | :---: | :--- |
