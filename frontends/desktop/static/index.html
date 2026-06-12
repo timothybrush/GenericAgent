@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title>GenericAgent</title>
 <link rel="stylesheet" href="assets/fonts/fonts.css">
-<link rel="stylesheet" href="styles.css?v=133">
+<link rel="stylesheet" href="styles.css?v=134">
 <!-- KaTeX: LaTeX 公式渲染 -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
 <!-- highlight.js: 代码高亮 -->
@@ -78,6 +78,30 @@
           <span data-i18n="nav.token"></span>
         </a>
       </nav>
+
+      <!-- 快速接入官方模型（DeepSeek / 通义千问）：填好 API Key 即可使用 -->
+      <div class="provider-quickstart" id="provider-quickstart">
+        <div class="pq-head">
+          <span class="pq-title" data-i18n="pq.title"></span>
+          <span class="pq-sub" data-i18n="pq.sub"></span>
+        </div>
+        <button type="button" class="pq-btn" data-provider="deepseek">
+          <span class="pq-logo" style="background:#4D6BFE" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></span>
+          <span class="pq-btn-text">
+            <span class="pq-btn-name">DeepSeek</span>
+            <span class="pq-btn-desc" data-i18n="pq.deepseekDesc"></span>
+          </span>
+          <span class="pq-arrow" data-ga-icon="caretRight"></span>
+        </button>
+        <button type="button" class="pq-btn" data-provider="qwen">
+          <span class="pq-logo" style="background:#615CED" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6.5v9L12 22l8-6.5v-9z"/><path d="M12 22V12.5M12 12.5 4 6.5M12 12.5 20 6.5"/></svg></span>
+          <span class="pq-btn-text">
+            <span class="pq-btn-name">通义千问</span>
+            <span class="pq-btn-desc" data-i18n="pq.qwenDesc"></span>
+          </span>
+          <span class="pq-arrow" data-ga-icon="caretRight"></span>
+        </button>
+      </div>
 
       <div class="sidebar-foot">
         <a class="foot-row" id="settings-btn">
@@ -432,6 +456,24 @@
         </button>
       </div>
       <div class="modal-body model-form-body">
+        <div class="model-guide" id="model-guide" hidden>
+          <div class="model-guide-head">
+            <span class="model-guide-logo" id="model-guide-logo" aria-hidden="true"></span>
+            <span class="model-guide-name" id="model-guide-name"></span>
+          </div>
+          <ol class="model-guide-steps">
+            <li data-i18n="guide.step1"></li>
+            <li data-i18n="guide.step2"></li>
+            <li data-i18n="guide.step3"></li>
+          </ol>
+          <div class="model-guide-link-row">
+            <a class="model-guide-link" id="model-guide-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <button type="button" class="model-guide-copy" id="model-guide-copy" data-i18n-title="guide.copy" title="" aria-label="copy">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+          <p class="model-guide-tip" data-i18n="guide.prefillTip"></p>
+        </div>
         <form id="add-model-form" class="model-form" autocomplete="off">
           <label><span class="field-label"><span data-i18n="model.model"></span><span class="field-req" aria-hidden="true">*</span></span><input name="model" required data-i18n-ph="model.modelPh" maxlength="50"><span class="field-hint" data-i18n="model.modelHint"></span></label>
           <label id="model-apikey-label"><span class="field-label"><span data-i18n="model.apikey"></span><span class="field-req" aria-hidden="true">*</span></span><input name="apikey" type="password" data-i18n-ph="model.apikeyPh" id="model-apikey-input" maxlength="200"></label>
@@ -605,6 +647,6 @@
 <!-- highlight.js -->
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
 <script src="phosphor-icons.js"></script>
-<script src="app.js?v=178"></script>
+<script src="app.js?v=179"></script>
 </body>
 </html>

@@ -287,6 +287,13 @@ const I18N = {
     'model.modelHint': '须与中转站/官方文档中的 model 字段完全一致',
     'model.retries': '重试 (次)', 'model.connTimeout': '连接超时 (s)', 'model.readTimeout': '读取超时 (s)',
     'model.save': '保存', 'common.cancel': '取消', 'common.edit': '编辑', 'common.delete': '删除',
+    'pq.title': '快速接入官方模型', 'pq.sub': '填好 API Key 即可使用',
+    'pq.deepseekDesc': '官方 API · OpenAI 兼容', 'pq.qwenDesc': '通义千问 · 阿里云百炼',
+    'guide.step1': '点击下方链接，登录后创建并复制 API Key',
+    'guide.step2': '把 Key 粘贴到下方「API Key」输入框',
+    'guide.step3': '点击保存，即可在模型列表中选用',
+    'guide.prefillTip': '已为你预填 API 地址、协议与模型，可按需修改',
+    'guide.getKey': '获取 {name} 的 API Key', 'guide.copy': '复制链接', 'guide.copied': '链接已复制',
     'err.modelSave': '保存失败', 'err.modelRequired': '请填写模型、API Key 和 API 地址',
     'err.modelDelete': '删除失败', 'err.modelDeleteLast': '至少保留一个模型',
     'confirm.modelDelete': '确定删除该模型配置？',
@@ -440,6 +447,13 @@ const I18N = {
     'model.modelHint': 'Must match the model field in your provider docs exactly',
     'model.retries': 'Retries (×)', 'model.connTimeout': 'Connect (s)', 'model.readTimeout': 'Read (s)',
     'model.save': 'Save', 'common.cancel': 'Cancel', 'common.edit': 'Edit', 'common.delete': 'Delete',
+    'pq.title': 'Quick connect a model', 'pq.sub': 'Add your API key to get started',
+    'pq.deepseekDesc': 'Official API · OpenAI-compatible', 'pq.qwenDesc': 'Tongyi Qwen · Aliyun Bailian',
+    'guide.step1': 'Open the link, sign in, then create & copy your API key',
+    'guide.step2': 'Paste the key into the “API Key” field below',
+    'guide.step3': 'Click Save — then pick it from the model list',
+    'guide.prefillTip': 'API base, protocol and model are pre-filled — edit if needed',
+    'guide.getKey': 'Get your {name} API key', 'guide.copy': 'Copy link', 'guide.copied': 'Link copied',
     'err.modelSave': 'Save failed', 'err.modelRequired': 'Model, API Key and base URL are required',
     'err.modelDelete': 'Delete failed', 'err.modelDeleteLast': 'At least one model is required',
     'confirm.modelDelete': 'Delete this model profile?',
@@ -649,6 +663,7 @@ function applyI18n() {
   });
   document.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.dataset.i18nTitle)); });
   renderLangList();
+  window.gaRefreshModelGuide?.();
   window.collabRetranslate?.();
   syncAskUserUi();
 }
@@ -833,6 +848,22 @@ bindClick('add-model-btn', (e) => {
   openAddModelForm();
 });
 bindClick('settings-btn',  (e) => { e.stopPropagation(); openSettings(); });
+// 侧边栏「快速接入」：点击官方模型按钮 → 打开预填好的添加模型表单
+const pqEl = document.getElementById('provider-quickstart');
+if (pqEl) pqEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.pq-btn[data-provider]');
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  openAddModelFormForProvider(btn.dataset.provider);
+});
+// 接入指引：复制获取 API Key 的链接
+bindClick('model-guide-copy', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  const link = document.getElementById('model-guide-link');
+  const url = link ? link.href : '';
+  if (!url || !navigator.clipboard) return;
+  navigator.clipboard.writeText(url).then(() => showChanToast(t('guide.copied'), '', 'ok')).catch(() => {});
+});
 bindClick('preset-btn',    (e) => { e.stopPropagation(); openModal('preset-modal'); });
 document.querySelectorAll('.modal').forEach(m =>
   m.addEventListener('click', (e) => {
@@ -3214,6 +3245,72 @@ function setModelApikeyMode(isAdd) {
   if (apikeyReq) apikeyReq.hidden = !isAdd;
 }
 
+/* ═══════════════ 官方模型快速接入（DeepSeek / 通义千问）═══════════════ */
+// 预填 API 地址 / 协议 / 模型，用户只需粘贴 API Key。apibase 末尾的 /v1 会被
+// 后端自动补成 /v1/chat/completions（见 mykey_template.py 的拼接规则）。
+const PROVIDER_PRESETS = {
+  deepseek: {
+    label: 'DeepSeek', descKey: 'pq.deepseekDesc',
+    protocol: 'oai', apibase: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat', name: 'DeepSeek',
+    keyUrl: 'https://platform.deepseek.com/api_keys', color: '#4D6BFE',
+    logo: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>',
+  },
+  qwen: {
+    label: '通义千问', descKey: 'pq.qwenDesc',
+    protocol: 'oai', apibase: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus', name: '通义千问',
+    keyUrl: 'https://bailian.console.aliyun.com/?apiKey=1', color: '#615CED',
+    logo: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6.5v9L12 22l8-6.5v-9z"/><path d="M12 22V12.5M12 12.5 4 6.5M12 12.5 20 6.5"/></svg>',
+  },
+};
+window.gaProviderPresets = PROVIDER_PRESETS;
+
+// 在「添加模型」弹窗顶部显示/隐藏接入指引横幅。key 为 null 时隐藏。
+function setModelGuide(key) {
+  const box = document.getElementById('model-guide');
+  if (!box) return;
+  const p = key && PROVIDER_PRESETS[key];
+  if (!p) { box.hidden = true; box.dataset.provider = ''; return; }
+  box.hidden = false;
+  box.dataset.provider = key;
+  const logo = document.getElementById('model-guide-logo');
+  if (logo) { logo.innerHTML = p.logo || ''; logo.style.background = p.color || ''; }
+  const nameEl = document.getElementById('model-guide-name');
+  if (nameEl) nameEl.textContent = p.label;
+  const link = document.getElementById('model-guide-link');
+  if (link) { link.href = p.keyUrl; link.textContent = t('guide.getKey').replace('{name}', p.label); }
+}
+window.gaRefreshModelGuide = () => {
+  const box = document.getElementById('model-guide');
+  if (box && !box.hidden && box.dataset.provider) setModelGuide(box.dataset.provider);
+};
+
+function openAddModelFormForProvider(key) {
+  const p = PROVIDER_PRESETS[key];
+  if (!p) return openAddModelForm();
+  editingModelId = null;
+  const form = document.getElementById('add-model-form');
+  const title = document.getElementById('model-form-title');
+  const errEl = document.getElementById('add-model-err');
+  if (title) title.dataset.i18n = 'modal.addModel';
+  if (form) {
+    form.reset();
+    form.model.value = p.model || '';
+    form.apibase.value = p.apibase || '';
+    form.name.value = p.name || '';
+    const pr = form.querySelector(`input[name="protocol"][value="${p.protocol}"]`);
+    if (pr) pr.checked = true;
+  }
+  setModelApikeyMode(true);
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  setModelGuide(key);
+  openModal('add-model-modal');
+  applyI18n();
+  const apikey = document.getElementById('model-apikey-input');
+  if (apikey) setTimeout(() => apikey.focus(), 60);
+}
+
 function openAddModelForm() {
   editingModelId = null;
   const form = document.getElementById('add-model-form');
@@ -3222,12 +3319,14 @@ function openAddModelForm() {
   if (title) title.dataset.i18n = 'modal.addModel';
   if (form) form.reset();
   setModelApikeyMode(true);
+  setModelGuide(null);
   if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
   openModal('add-model-modal');
   applyI18n();
 }
 async function openEditModelForm(id) {
   editingModelId = id;
+  setModelGuide(null);
   const errEl = document.getElementById('add-model-err');
   if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
   try {
