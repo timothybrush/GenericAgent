@@ -275,7 +275,7 @@ const I18N = {
     'customPreset.empty': '标题和 Prompt 不能为空',
     'customPreset.removeTitle': '删除',
     'builtinPreset.restoreBtn': '恢复默认预设',
-    'set.appearance': '外观', 'set.plainUi': '素色', 'set.fontSize': '聊天字号', 'set.theme': '颜色', 'set.lang': '语言', 'set.model': '模型', 'set.addModel': '添加模型',
+    'set.appearance': '外观', 'set.plainUi': '素色', 'set.fontSize': '聊天字号', 'set.lang': '语言', 'set.model': '模型', 'set.addModel': '添加模型',
     'appearance.light': '浅色', 'appearance.dark': '深色',
     'set.noModels': '暂无模型，点击下方添加',
     'lang.zh': '简体中文', 'lang.en': 'English',
@@ -435,7 +435,7 @@ const I18N = {
     'customPreset.empty': 'Title and Prompt cannot be empty',
     'customPreset.removeTitle': 'Delete',
     'builtinPreset.restoreBtn': 'Restore defaults',
-    'set.appearance': 'Appearance', 'set.plainUi': 'Plain', 'set.fontSize': 'Chat font size', 'set.theme': 'Color', 'set.lang': 'Language', 'set.model': 'Model', 'set.addModel': 'Add model',
+    'set.appearance': 'Appearance', 'set.plainUi': 'Plain', 'set.fontSize': 'Chat font size', 'set.lang': 'Language', 'set.model': 'Model', 'set.addModel': 'Add model',
     'appearance.light': 'Light', 'appearance.dark': 'Dark',
     'set.noModels': 'No models yet — add one below',
     'lang.zh': '简体中文', 'lang.en': 'English',
@@ -779,14 +779,10 @@ function applyChatFontSize(size, { persist } = { persist: true }) {
   if (persist) void persistUiPrefs();
 }
 function applyTheme(id, { persist } = { persist: true }) {
-  const n = parseInt(id, 10);
-  theme = (n >= 1 && n <= 8) ? String(n) : '1';
-  const root = document.documentElement;
-  root.dataset.theme = theme;
-  root.style.setProperty('--accent', getComputedStyle(root).getPropertyValue(`--swatch-${theme}`).trim());
-  document.querySelectorAll('#theme-swatches .swatch').forEach(el => {
-    el.classList.toggle('sel', el.dataset.theme === theme);
-  });
+  // 主题选色已下线,只保留灰色亮色主题(--accent 在 styles.css 里硬编码)。
+  // 函数保留可调用,只把 dataset.theme 固定到 '1' 兼容旧 localStorage。
+  theme = '1';
+  document.documentElement.dataset.theme = '1';
   if (persist) void persistUiPrefs();
 }
 function syncPlainSwitch() {
@@ -3521,11 +3517,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-const themeSwatches = document.getElementById('theme-swatches');
-if (themeSwatches) themeSwatches.addEventListener('click', (e) => {
-  const sw = e.target.closest('.swatch[data-theme]');
-  if (sw) applyTheme(sw.dataset.theme);
-});
+// 主题色板已删除,点击事件不再注册
 const appearanceSeg = document.getElementById('appearance-seg');
 if (appearanceSeg) appearanceSeg.addEventListener('click', (e) => {
   const btn = e.target.closest('.appear-card[data-appearance]');
@@ -4286,7 +4278,9 @@ function renderTokChart() {
     return `<text x="${pts[i][0]}" y="${H-4}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.slice(5)}</text>`;
   }).join('');
   const dots = pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--blue)"><title>${days[i]}: ${fmtTok(vals[i])}</title></circle>`).join('');
-  tokChartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${yLines}${xLabels}<polyline points="${polyline}" fill="none" stroke="var(--blue)" stroke-width="1.5"/>${dots}</svg>`;
+  // 保持 viewBox 自然比例,文字不被非等比缩放压扁。配合容器 aspect-ratio:600/260,
+  // 视觉上铺满又不变形。
+  tokChartEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${yLines}${xLabels}<polyline points="${polyline}" fill="none" stroke="var(--blue)" stroke-width="1.5"/>${dots}</svg>`;
 }
 
 nav.addEventListener('click',(e)=>{const item=e.target.closest('.nav-item');if(item&&item.dataset.page==='token'){if(_tokTab==='conductor')loadConductorTokens();else loadTokenPage();}if(item&&item.dataset.page==='services')refreshServicesPanel();});
