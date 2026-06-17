@@ -170,7 +170,7 @@ html[data-appearance="dark"][data-theme]{
 }
 
 html,body{ height:100%; }
-html{ --chat-font:14px; }
+html{ --chat-font:13px; }
 body{ background:var(--bg); color:var(--txt); font-size:13px; overflow:hidden; font-family:var(--font-sans); }
 
 #app{
@@ -401,7 +401,7 @@ body{ background:var(--bg); color:var(--txt); font-size:13px; overflow:hidden; f
 
 .body{
   --shell-pad:14px;
-  --shell-head-h:36px;
+  --shell-head-h:28px;
   --shell-gap:10px;
   --new-conv-h:40px;
   --conv-list-pad-top:0;
@@ -729,11 +729,11 @@ body{ background:var(--bg); color:var(--txt); font-size:13px; overflow:hidden; f
   align-items:stretch;
   justify-content:center;
   gap:14px;
-  padding:16px;
+  padding:16px 0;
   margin:0;
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  background:var(--card);
+  border:none;
+  border-radius:0;
+  background:transparent;
   box-sizing:border-box;
 }
 .page.page--chat-ui .composer-anchor,
@@ -855,9 +855,9 @@ body{ background:var(--bg); color:var(--txt); font-size:13px; overflow:hidden; f
   border-left:3px solid var(--line-strong); color:var(--txt-2);
 }
 .bubble.md h1,.bubble.md h2,.bubble.md h3,.bubble.md h4,.bubble.md h5,.bubble.md h6{
-  color:var(--txt-strong); margin:0 0 8px; line-height:1.35;
+  color:var(--txt-strong); margin:0 0 8px; line-height:1.35; font-weight:600;
 }
-.bubble.md h1{ font-size:1.25em; } .bubble.md h2{ font-size:1.15em; } .bubble.md h3{ font-size:1.05em; }
+.bubble.md h1{ font-size:1.3em; } .bubble.md h2{ font-size:1.15em; } .bubble.md h3{ font-size:1.05em; }
 .bubble.md strong,.bubble.md b{ color:var(--txt-strong); font-weight:600; }
 .bubble.md hr{ border:none; border-top:1px solid var(--line-strong); margin:10px 0; }
 .bubble.md table{ width:100%; border-collapse:collapse; margin:0 0 8px; font-size:.92em; }
@@ -1197,14 +1197,14 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
 .composer-inset .input{
   width:100%; min-height:38px; max-height:160px; overflow-y:auto;
   border:none; border-radius:0; background:transparent;
-  padding:10px 12px; font-size:15px; line-height:1.55; outline:none;
+  padding:10px 12px; font-size:13px; line-height:1.55; outline:none;
   font-family:inherit; color:var(--txt);
   white-space:pre-wrap; word-break:break-word;
 }
 /* contenteditable 空提示（textarea 的 placeholder 等价物）*/
 .composer-inset .input:empty::before{
   content:attr(data-ph); color:var(--muted); pointer-events:none;
-  font-size:15px; font-weight:400;
+  font-size:13px; font-weight:400;
 }
 .composer-inset .composer-bot{
   margin-top:0; padding:2px 10px 8px; justify-content:flex-start;
