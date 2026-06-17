@@ -47,26 +47,16 @@
   --icon:#6b7180;
   --on-accent:#ffffff;      /* 彩色底上的字/图标 */
 
-  /* —— 强调色（主题主色，切主题主要改这组）—— */
-  --accent:#1f6f53;
-  --accent-bg:#e7f2ed;
-  --accent-soft:#f1f8f4;
-  /* 向后兼容别名：旧代码 / 未合并分支(如 PR#1)仍用 --blue*，全部迁到 --accent* 后可删 */
+  /* —— 强调色(只保留灰色亮色主题,删去 mac 8 色主题切换)—— */
+  --accent:#8e8e93;
+  --accent-bg:#eef0f3;
+  --accent-soft:#f4f5f7;
+  /* 向后兼容别名:旧代码 / 未合并分支(如 PR#1)仍用 --blue* */
   --blue:var(--accent); --blue-bg:var(--accent-bg); --blue-soft:var(--accent-soft);
 
   /* —— 品牌徽标渐变 —— */
   --brand1:#ffb35c;
   --brand2:#ff7a59;
-
-  /* —— 配置弹窗：主题色板（mac 8 色）—— */
-  --swatch-1:#1f6f53;
-  --swatch-2:#7c5cff;
-  --swatch-3:#007aff;
-  --swatch-4:#ff7a59;
-  --swatch-5:#ff2d55;
-  --swatch-6:#ff3b30;
-  --swatch-7:#ffcc00;
-  --swatch-8:#8e8e93;
 
   /* —— 状态：成功 / 危险 / 关闭 —— */
   --ok:#39a85a;
@@ -114,15 +104,13 @@
   --fold-retry-bg:transparent;
 }
 
-/* —— 主题色板（素色：仅 accent 浅底）—— */
+/* —— 主题色板(素色:仅 accent 浅底) —— */
 html[data-theme]{
   --accent-bg:color-mix(in srgb, var(--accent) 14%, var(--panel));
   --accent-soft:color-mix(in srgb, var(--accent) 7%, var(--panel));
   --brand1:color-mix(in srgb, var(--accent) 40%, #ffc978);
   --brand2:var(--accent);
 }
-html[data-theme="7"]{ --on-accent:#1f2430; }
-html[data-theme="8"]{ --on-accent:#ffffff; }
 
 /* —— 外观：浅色（accent 轻 tint 页面/边框）—— */
 html[data-appearance="light"]:not([data-plain="1"])[data-theme]{
@@ -135,8 +123,6 @@ html[data-appearance="light"]:not([data-plain="1"])[data-theme]{
 
 /* —— 外观：深色 —— */
 html[data-appearance="dark"]{
-  --swatch-7:#ffd60a;
-  --swatch-8:#e6edf3;
   --bg-base:#161b22;
   --bg:#161b22;
   --panel:#21262d;
@@ -185,9 +171,6 @@ html[data-appearance="dark"][data-theme]{
   --accent-bg:color-mix(in srgb, var(--accent) 22%, var(--panel));
   --accent-soft:color-mix(in srgb, var(--accent) 12%, var(--panel));
 }
-html[data-appearance="dark"][data-theme="7"],
-html[data-appearance="dark"][data-theme="7"],
-html[data-appearance="dark"][data-theme="8"]{ --on-accent:#161b22; }
 
 html,body{ height:100%; }
 html{ --chat-font:14px; }
@@ -335,40 +318,7 @@ body{ background:var(--bg); color:var(--txt); font-size:13px; overflow:hidden; f
 .chat-font-scale-min{ grid-column:1; justify-self:start; }
 .chat-font-scale-max{ grid-column:11; justify-self:end; }
 
-/* 颜色：mac 式 4×2 色盘 */
-.color-grid{
-  display:grid; grid-template-columns:repeat(4, 1fr); gap:12px 10px;
-  justify-items:center; max-width:220px;
-}
-.swatch{
-  position:relative; width:32px; height:32px; border-radius:50%; cursor:pointer;
-  background:var(--swatch-color, var(--swatch-1));
-  border:2px solid color-mix(in srgb, var(--panel) 70%, transparent);
-  box-shadow:0 1px 2px var(--hover-dim);
-  transition:transform .12s, box-shadow .12s;
-}
-.swatch:hover{ transform:scale(1.08); }
-.swatch:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
-.swatch.sel{
-  box-shadow:0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
-  transform:scale(1.04);
-}
-.swatch.sel::after{
-  content:''; position:absolute; inset:0; border-radius:50%;
-  background:center/14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
-}
-html[data-theme="7"] .swatch[data-theme="7"].sel::after,
-html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231f2430' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
-}
-.swatch[data-theme="1"]{ --swatch-color:var(--swatch-1); }
-.swatch[data-theme="2"]{ --swatch-color:var(--swatch-2); }
-.swatch[data-theme="3"]{ --swatch-color:var(--swatch-3); }
-.swatch[data-theme="4"]{ --swatch-color:var(--swatch-4); }
-.swatch[data-theme="5"]{ --swatch-color:var(--swatch-5); }
-.swatch[data-theme="6"]{ --swatch-color:var(--swatch-6); }
-.swatch[data-theme="7"]{ --swatch-color:var(--swatch-7); }
-.swatch[data-theme="8"]{ --swatch-color:var(--swatch-8); }
+/* 颜色色盘已删除(只保留灰色亮色主题) */
 .model-list{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; max-height:160px; overflow:auto; }
 .model-row{
   display:flex; align-items:center; gap:10px; padding:8px 10px;
@@ -534,10 +484,12 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 }
 .nav-item.active .beta{ background:var(--card); }
 
-.sidebar-foot{ border-top:none; padding-top:10px; margin-top:8px; }
+/* margin-top:6px 跟 .provider-quickstart 内部的 gap:6px 对齐,
+   保证「通义千问 → 配置」和「pq-head → DeepSeek」间距一致 */
+.sidebar-foot{ border-top:none; padding-top:0; margin-top:6px; }
 .foot-row{
   display:flex; justify-content:space-between; align-items:center;
-  padding:8px 10px; border-radius:var(--radius-sm); color:var(--txt-2); cursor:pointer;
+  padding:14px 10px; border-radius:var(--radius-sm); color:var(--txt-2); cursor:pointer;
   font-family:var(--font-title-en);
 }
 .foot-row:hover{ background:var(--line-soft); }
@@ -547,31 +499,30 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
   font-family:var(--font-num); font-variant-numeric:var(--font-num-variant);
 }
 
-/* ── 侧边栏「快速接入官方模型」卡片 ── */
+/* ── 侧边栏「快速接入官方模型」:头部与「配置」按钮同款 foot-row 风格,
+   左侧 lightning 图标 + 标题,右侧 caretRight 跟"配置"完全一致,
+   展开时旋转 90° 朝下,折叠时朝右(== "配置"的 >)。默认展开,可折叠。── */
 .provider-quickstart{
   flex:0 0 auto; margin-top:8px;
   display:flex; flex-direction:column; gap:6px;
-  padding:10px; border:1px solid var(--line-base); border-radius:var(--radius-sm);
-  background:var(--card);
 }
 .pq-head{
-  display:flex; align-items:center; justify-content:space-between; gap:6px;
-  padding:0 2px; cursor:pointer; user-select:none; border-radius:4px;
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 10px; border-radius:var(--radius-sm); color:var(--txt-2); cursor:pointer;
+  font-family:var(--font-title-en); user-select:none;
 }
-.pq-head-text{ display:flex; flex-direction:column; gap:1px; min-width:0; }
-.pq-title{ font-size:11px; font-weight:700; color:var(--txt-2); font-family:var(--font-title-en); }
-.pq-sub{ font-size:10px; color:var(--muted); line-height:1.3; }
-.pq-collapse{ width:14px; height:14px; flex:0 0 auto; color:var(--muted2); transition:transform .18s; }
+.pq-head:hover{ background:var(--line-soft); }
+.pq-collapse{ transition:transform .18s; }
 .pq-head:hover .pq-collapse{ color:var(--txt-2); }
-.pq-body{ display:flex; flex-direction:column; gap:6px; }
-/* 折叠：隐藏按钮区，箭头翻转向上 */
+.pq-body{ display:flex; flex-direction:column; gap:6px; padding:0 10px; }
+/* 默认展开:箭头朝下;折叠:箭头朝右(== 「配置」的 >) */
+.provider-quickstart:not(.collapsed) .pq-collapse{ transform:rotate(90deg); }
 .provider-quickstart.collapsed{ gap:0; }
 .provider-quickstart.collapsed .pq-body{ display:none; }
-.provider-quickstart.collapsed .pq-collapse{ transform:rotate(180deg); }
 .pq-btn{
   display:flex; align-items:center; gap:8px; width:100%;
   padding:7px 8px; border:1px solid var(--line-base); border-radius:var(--radius-sm);
-  background:var(--bg-base); cursor:pointer; text-align:left;
+  background:var(--field-bg); cursor:pointer; text-align:left;
   transition:border-color .15s, background .15s;
 }
 .pq-btn:hover{ background:var(--card); border-color:var(--accent); }
@@ -589,8 +540,8 @@ html[data-appearance="dark"] .swatch[data-theme="8"].sel::after{
 /* ── 添加模型弹窗内的接入指引横幅 ── */
 .model-guide{
   margin:18px 18px 0; padding:12px 14px;
-  border:1px solid var(--accent); border-radius:var(--radius-sm);
-  background:var(--accent-bg);
+  border:1px solid var(--line-base); border-radius:var(--radius-sm);
+  background:var(--field-bg);
 }
 .model-guide-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
 .model-guide-logo{
@@ -940,9 +891,10 @@ html[data-boot-has-sessions] .chat-start{ display:none !important; }
 .fc-t{ font-weight:600; font-size:13px; margin-top:10px; font-family:var(--font-title-en); }
 .fc-d{ font-size:11px; color:var(--muted); margin-top:3px; }
 
-/* 后台服务页 — 下划线 Tab（消息通道 / 状态面板）*/
+/* 后台服务页 — 下划线 Tab(消息通道 / 状态面板)。margin 与 .tok-tabs 对齐
+   保证两个页面标题与 tab 之间间距一致 */
 .svc-tabs{
-  display:flex; gap:28px; margin-top:4px;
+  display:flex; gap:28px; margin:10px 0 0;
   border-bottom:1px solid var(--line);
 }
 .svc-tab{
@@ -1083,8 +1035,10 @@ html[data-boot-has-sessions] .chat-start{ display:none !important; }
 .tok-chart-toggle:hover{ color:var(--txt); }
 .tok-chart-toggle::before{ content:'▶'; display:inline-block; margin-right:4px; font-size:9px; transition:transform .15s; }
 .tok-chart-toggle.open::before{ transform:rotate(90deg); }
-.tok-chart{ margin-top:8px; height:280px; max-width:760px; position:relative; }
-.tok-chart svg{ width:100%; height:100%; }
+/* 用 aspect-ratio 跟 SVG viewBox 600/260 对齐,避免容器拉伸导致字被压扁;
+   min-height 兜底:窄屏时也不会塌成一条 */
+.tok-chart{ margin-top:8px; aspect-ratio:600/260; max-width:760px; min-height:280px; position:relative; }
+.tok-chart svg{ width:100%; height:100%; display:block; }
 .tok-filter{ display:flex; align-items:center; gap:8px; margin:12px 0; flex-wrap:wrap; }
 .tok-filter label{ font-size:12px; color:var(--muted); }
 .tok-date{
@@ -1126,12 +1080,23 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
   font-size:12px; background:var(--field-bg); color:var(--muted); cursor:pointer;
 }
 .tok-reset:hover{ background:var(--hover-2); color:var(--txt-2); }
-.tok-table{ width:100%; border-collapse:collapse; margin-top:14px; font-size:13px; }
+/* 固定列宽:数字列按 fmtTok 最长输出"123.45M"宽度估算固定 px,
+   第一列(会话名/指挥家累计 等)拿剩余空间,过长用省略号 + title tooltip */
+.tok-table{ width:100%; border-collapse:collapse; margin-top:14px; font-size:13px; table-layout:fixed; }
 .tok-table th{ text-align:left; padding:8px 12px; font-size:11px; color:var(--muted); background:var(--line-soft); font-weight:600; }
 .tok-table th:not(:first-child){ text-align:right; }
 .tok-table td{ padding:9px 12px; border-bottom:1px solid var(--line-soft); }
 .tok-table td:not(:first-child){ text-align:right; color:var(--muted); font-size:12px; font-family:var(--font-num); font-variant-numeric:var(--font-num-variant); }
 .tok-table td:first-child{ font-weight:600; color:var(--txt-strong); }
+/* 第一列自动占剩余宽度,溢出省略 */
+.tok-table th:first-child, .tok-table td:first-child{
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+/* 数字列固定 80px,缓存率列 85px */
+.tok-table th:nth-child(n+2):nth-child(-n+5),
+.tok-table td:nth-child(n+2):nth-child(-n+5){ width:80px; }
+.tok-table th:nth-child(6),
+.tok-table td:nth-child(6){ width:85px; }
 .tok-row-session{ cursor:pointer; }
 .tok-row-session:hover td{ background:var(--hover-dim); }
 .tok-row-session td:first-child::before{ content:'▶'; margin-right:6px; font-size:10px; color:var(--muted2); transition:transform .15s; display:inline-block; }
