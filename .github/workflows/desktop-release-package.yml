@@ -1,0 +1,564 @@
+name: Build Desktop Portable Packages
+
+# Triggers:
+#   - workflow_dispatch  -> build CI artifacts for testing (choose a target platform)
+#   - push tag desktop-portable-*  -> build all three platforms and publish them
+#     together into ONE GitHub Release (tag = the pushed tag)
+# Plain pushes to branches do NOT build (avoids 3 heavy Rust builds per commit).
+"on":
+  push:
+    tags:
+      - "desktop-portable-*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Which platform(s) to build (artifacts only; release happens on tag push)"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - "all"
+          - "windows"
+          - "linux"
+          - "macos"
+
+permissions:
+  contents: write
+
+jobs:
+  # ----------------------------------------------------------------------------
+  build-windows:
+    name: Windows portable
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.target == 'all' || github.event.inputs.target == 'windows' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontends/desktop/src-tauri -> target
+
+      - name: Install desktop dependencies
+        working-directory: frontends/desktop
+        run: npm install
+
+      - name: Build Windows desktop exe
+        working-directory: frontends/desktop
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Assemble self-contained portable bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          EXE_SRC="$(find frontends/desktop/src-tauri/target/release -maxdepth 1 -type f -name 'ga-desktop.exe' | head -n 1)"
+          [[ -n "$EXE_SRC" ]] || { echo "ga-desktop.exe not found" >&2; exit 1; }
+
+          PKG="artifacts/windows/GenericAgent-Desktop-Windows-Portable"
+          RUNTIME="$PKG/runtime"
+          mkdir -p "$RUNTIME"
+
+          # exe at the top level, named GenericAgent (typical portable form)
+          cp "$EXE_SRC" "$PKG/GenericAgent.exe"
+          cp desktop_release/scripts/windows/install_windows.ps1 "$RUNTIME/install_windows.ps1"
+
+          # Embedded Python (python-build-standalone, windows x86_64, 3.12 install_only).
+          # browser_download_url is URL-encoded ('+' -> '%2B'); match loosely with '.*'.
+          PBS_URL="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+            | grep -o '"browser_download_url": *"[^"]*"' \
+            | grep 'cpython-3\.12\.[0-9].*x86_64-pc-windows-msvc-install_only\.tar\.gz' \
+            | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
+          [[ -n "$PBS_URL" ]] || { echo "Could not resolve python-build-standalone download URL" >&2; exit 1; }
+          echo "Python build-standalone: $PBS_URL"
+          curl -fsSL -o /tmp/pbs.tar.gz "$PBS_URL"
+          tar -xzf /tmp/pbs.tar.gz -C "$RUNTIME"   # extracts a 'python/' dir (python.exe at top)
+          PY="$RUNTIME/python/python.exe"
+          "$PY" --version
+
+          # Offline wheels (native win_amd64 wheels for the embedded python)
+          mkdir -p "$RUNTIME/wheels"
+          "$PY" -m pip download --dest "$RUNTIME/wheels" \
+            "requests>=2.28" "beautifulsoup4>=4.12" "bottle>=0.12" "simple-websocket-server>=0.4" "aiohttp>=3.9" psutil \
+            fastapi uvicorn websockets pydantic setuptools wheel
+
+          # Runtime source (project root minus heavy/dev/build dirs)
+          mkdir -p "$RUNTIME/app"
+          tar \
+            --exclude='./.git' --exclude='./.github' \
+            --exclude='./frontends/desktop/src-tauri' \
+            --exclude='./frontends/desktop/node_modules' \
+            --exclude='./desktop_release' --exclude='./docs' \
+            --exclude='./assets/demo' --exclude='./assets/images' \
+            --exclude='./assets/GenericAgent_Technical_Report.pdf' \
+            --exclude='./artifacts' \
+            --exclude='*/node_modules' --exclude='*/target' \
+            --exclude='*/.venv' --exclude='./.venv' \
+            --exclude='*/__pycache__' --exclude='*.pyc' \
+            -cf - . | tar -xf - -C "$RUNTIME/app"
+          test -f "$RUNTIME/app/agentmain.py"
+          test -f "$RUNTIME/app/frontends/desktop_bridge.py"
+          test -f "$RUNTIME/app/frontends/desktop/static/index.html"
+
+          # Drop python debug symbols (.pdb) to slim the package (~80MB)
+          find "$RUNTIME/python" -name '*.pdb' -delete 2>/dev/null || true
+
+          cat > "$PKG/安装使用说明_Install_Guide.txt" <<'EOF'
+          ================ 中文 ================
+          GenericAgent Desktop — Windows 便携版（自包含）
+
+          无需安装 Python、无需联网装依赖、无需源码仓库——全部已内置。
+
+          前置条件
+          - Windows 10/11 x64
+          - Microsoft Edge WebView2 运行时（Win11 一般自带；缺失时首次运行会提示安装）
+
+          使用
+          1. 解压到任意目录（路径建议不含特殊字符）。
+          2. 双击 GenericAgent.exe。
+          3. 首次启动会自动离线准备运行环境（建虚拟环境、装依赖），界面显示进度，完成后进入主界面。
+          4. 之后启动直接秒进。
+
+          说明
+          - 想真正对话，仍需在程序里配置模型 / API Key。
+          - 首次准备完成后不要移动本文件夹；若已移动，删除 runtime\app\.venv 后重新启动即可重建。
+          - runtime\ 是内置运行环境与源码，正常使用无需改动。
+
+          ================ English ================
+          GenericAgent Desktop — Windows Portable (self-contained)
+
+          No Python install, no internet for dependencies, no source checkout — everything is bundled.
+
+          Requirements
+          - Windows 10/11 x64
+          - Microsoft Edge WebView2 runtime (usually preinstalled on Win11; you are prompted if missing)
+
+          Usage
+          1. Extract anywhere (a path without special characters is recommended).
+          2. Double-click GenericAgent.exe.
+          3. The first launch prepares the runtime offline (creates a venv, installs deps) with a
+             progress UI, then opens the main window.
+          4. Subsequent launches start instantly.
+
+          Notes
+          - To actually chat, configure a model / API key inside the app.
+          - Do not move this folder after the first setup; if you did, delete runtime\app\.venv and relaunch to rebuild.
+          - runtime\ holds the bundled runtime and source; no need to touch it.
+          EOF
+          sed -i 's/^          //' "$PKG/安装使用说明_Install_Guide.txt"
+
+          echo "Package tree (top levels):"
+          find "$PKG" -maxdepth 2 -printf '%y %p\n' | sort | head -40
+
+      - name: Zip portable package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/windows/out | Out-Null
+          Compress-Archive -Path artifacts/windows/GenericAgent-Desktop-Windows-Portable `
+            -DestinationPath artifacts/windows/out/GenericAgent-Desktop-Windows-Portable.zip -Force
+          $h = Get-FileHash artifacts/windows/out/GenericAgent-Desktop-Windows-Portable.zip -Algorithm SHA256
+          "{0}  GenericAgent-Desktop-Windows-Portable.zip" -f $h.Hash.ToLowerInvariant() |
+            Set-Content -Encoding ASCII artifacts/windows/out/SHA256SUMS-windows.txt
+          Get-ChildItem artifacts/windows/out | Format-Table Name, Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenericAgent-Desktop-Windows-Portable-${{ github.run_number }}
+          path: |
+            artifacts/windows/out/GenericAgent-Desktop-Windows-Portable.zip
+            artifacts/windows/out/SHA256SUMS-windows.txt
+          if-no-files-found: error
+
+      - name: Publish into unified Release (tag push only)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ github.ref_name }}"
+          TITLE="GenericAgent Desktop Portable ${TAG_NAME}"
+          NOTES="Self-contained desktop portable packages (Windows / Linux / macOS). Extract anywhere and run GenericAgent; the first launch prepares the bundled Python env offline."
+          # Create the shared release if it does not exist yet (another OS job may win the race).
+          gh release create "$TAG_NAME" --target "${{ github.sha }}" --title "$TITLE" --notes "$NOTES" --prerelease || true
+          gh release upload "$TAG_NAME" artifacts/windows/out/* --clobber
+
+  # ----------------------------------------------------------------------------
+  build-linux:
+    name: Linux portable
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.target == 'all' || github.event.inputs.target == 'linux' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontends/desktop/src-tauri -> target
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install desktop dependencies
+        working-directory: frontends/desktop
+        run: npm install
+
+      - name: Build Linux AppImage
+        working-directory: frontends/desktop
+        run: npm run tauri build -- --bundles appimage
+
+      - name: Assemble self-contained portable bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          APPIMAGE_SRC="$(find frontends/desktop/src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
+          [[ -n "$APPIMAGE_SRC" ]] || { echo "No AppImage found" >&2; exit 1; }
+
+          PKG="artifacts/linux/GenericAgent-Desktop-Linux-Portable"
+          RUNTIME="$PKG/runtime"
+          mkdir -p "$RUNTIME"
+
+          # Stable internal name so the generated .desktop Exec= never changes on upgrades.
+          cp "$APPIMAGE_SRC" "$PKG/GenericAgent.AppImage"
+          chmod +x "$PKG/GenericAgent.AppImage"
+          cp desktop_release/scripts/linux/install_linux.sh "$RUNTIME/install_linux.sh"
+          chmod +x "$RUNTIME/install_linux.sh"
+
+          # Embedded Python (python-build-standalone, linux x86_64, 3.12 install_only).
+          PBS_URL="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+            | grep -o '"browser_download_url": *"[^"]*"' \
+            | grep 'cpython-3\.12\.[0-9].*x86_64-unknown-linux-gnu-install_only\.tar\.gz' \
+            | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
+          [[ -n "$PBS_URL" ]] || { echo "Could not resolve python-build-standalone download URL" >&2; exit 1; }
+          echo "Python build-standalone: $PBS_URL"
+          curl -fsSL -o /tmp/pbs.tar.gz "$PBS_URL"
+          tar -xzf /tmp/pbs.tar.gz -C "$RUNTIME"   # extracts a 'python/' dir
+          PY="$RUNTIME/python/bin/python3"
+          "$PY" --version
+
+          # Offline wheels (native linux wheels for the embedded python)
+          mkdir -p "$RUNTIME/wheels"
+          "$PY" -m pip download --dest "$RUNTIME/wheels" \
+            "requests>=2.28" "beautifulsoup4>=4.12" "bottle>=0.12" "simple-websocket-server>=0.4" "aiohttp>=3.9" psutil \
+            fastapi uvicorn websockets pydantic setuptools wheel
+
+          # Runtime source (project root minus heavy/dev/build dirs)
+          mkdir -p "$RUNTIME/app"
+          tar \
+            --exclude='./.git' --exclude='./.github' \
+            --exclude='./frontends/desktop/src-tauri' \
+            --exclude='./frontends/desktop/node_modules' \
+            --exclude='./desktop_release' --exclude='./docs' \
+            --exclude='./assets/demo' --exclude='./assets/images' \
+            --exclude='./assets/GenericAgent_Technical_Report.pdf' \
+            --exclude='./artifacts' \
+            --exclude='*/node_modules' --exclude='*/target' \
+            --exclude='*/.venv' --exclude='./.venv' \
+            --exclude='*/__pycache__' --exclude='*.pyc' \
+            -cf - . | tar -xf - -C "$RUNTIME/app"
+          test -f "$RUNTIME/app/agentmain.py"
+          test -f "$RUNTIME/app/frontends/desktop_bridge.py"
+          test -f "$RUNTIME/app/frontends/desktop/static/index.html"
+
+          # Drop python debug/cache bits to slim the package
+          find "$RUNTIME/python" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+          cat > "$PKG/安装使用说明_Install_Guide.txt" <<'EOF'
+          ================ 中文 ================
+          GenericAgent Desktop — Linux 便携版（自包含）
+
+          无需安装 Python、无需联网装依赖、无需源码仓库——全部已内置。
+
+          前置条件
+          - Linux x86_64（glibc，常见发行版即可）
+          - 桌面环境 + FUSE（运行 AppImage 所需；多数发行版自带）
+
+          使用
+          1. 解压到任意目录（路径建议不含特殊字符）。
+          2. 给 AppImage 执行权限并运行：
+                 chmod +x GenericAgent.AppImage
+                 ./GenericAgent.AppImage
+          3. 首次启动会自动离线准备运行环境（建虚拟环境、装依赖），界面显示进度，完成后进入主界面。
+          4. 之后启动直接秒进。
+
+          说明
+          - 想真正对话，仍需在程序里配置模型 / API Key。
+          - 首次准备完成后不要移动本文件夹；若已移动，删除 runtime/app/.venv 后重新启动即可重建。
+          - runtime/ 是内置运行环境与源码，正常使用无需改动。
+
+          ================ English ================
+          GenericAgent Desktop — Linux Portable (self-contained)
+
+          No Python install, no internet for dependencies, no source checkout — everything is bundled.
+
+          Requirements
+          - Linux x86_64 (glibc; common distributions work)
+          - A desktop environment + FUSE (required to run the AppImage; preinstalled on most distros)
+
+          Usage
+          1. Extract anywhere (a path without special characters is recommended).
+          2. Make the AppImage executable and run it:
+                 chmod +x GenericAgent.AppImage
+                 ./GenericAgent.AppImage
+          3. The first launch prepares the runtime offline (creates a venv, installs deps) with a
+             progress UI, then opens the main window.
+          4. Subsequent launches start instantly.
+
+          Notes
+          - To actually chat, configure a model / API key inside the app.
+          - Do not move this folder after the first setup; if you did, delete runtime/app/.venv and relaunch to rebuild.
+          - runtime/ holds the bundled runtime and source; no need to touch it.
+          EOF
+          sed -i 's/^          //' "$PKG/安装使用说明_Install_Guide.txt"
+
+          mkdir -p artifacts/linux/out
+          tar -C artifacts/linux -czf artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz GenericAgent-Desktop-Linux-Portable
+          ( cd artifacts/linux/out && sha256sum GenericAgent-Desktop-Linux-Portable.tar.gz > SHA256SUMS-linux.txt )
+
+          echo "Package contents:"
+          tar -tzf artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz | head -40
+          ls -lh artifacts/linux/out
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenericAgent-Desktop-Linux-Portable-${{ github.run_number }}
+          path: |
+            artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz
+            artifacts/linux/out/SHA256SUMS-linux.txt
+          if-no-files-found: error
+
+      - name: Publish into unified Release (tag push only)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ github.ref_name }}"
+          TITLE="GenericAgent Desktop Portable ${TAG_NAME}"
+          NOTES="Self-contained desktop portable packages (Windows / Linux / macOS). Extract anywhere and run GenericAgent; the first launch prepares the bundled Python env offline."
+          gh release create "$TAG_NAME" --target "${{ github.sha }}" --title "$TITLE" --notes "$NOTES" --prerelease || true
+          gh release upload "$TAG_NAME" artifacts/linux/out/* --clobber
+
+  # ----------------------------------------------------------------------------
+  build-macos:
+    name: macOS portable
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event.inputs.target == 'all' || github.event.inputs.target == 'macos' }}
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontends/desktop/src-tauri -> target
+
+      - name: Install desktop dependencies
+        working-directory: frontends/desktop
+        run: npm install
+
+      - name: Build macOS .app
+        working-directory: frontends/desktop
+        run: npm run tauri build -- --bundles app
+
+      - name: Assemble self-contained portable bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PKG="artifacts/macos/GenericAgent-Desktop-macOS-Portable"
+          RUNTIME="$PKG/runtime"
+          mkdir -p "$PKG" "$RUNTIME"
+
+          APP_SRC="$(find frontends/desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          [[ -n "$APP_SRC" ]] || { echo "No .app found" >&2; exit 1; }
+          # ditto (not cp -R) preserves symlinks/resource forks and the ad-hoc code
+          # signature; a broken signature is what makes Apple Silicon report "damaged".
+          ditto "$APP_SRC" "$PKG/GenericAgent.app"
+          codesign --force --deep --sign - "$PKG/GenericAgent.app"
+          codesign --verify --deep --strict "$PKG/GenericAgent.app" || true
+
+          cp desktop_release/scripts/macos/install_macos.sh "$RUNTIME/install_macos.sh"
+          chmod +x "$RUNTIME/install_macos.sh"
+
+          # Embedded Python (python-build-standalone, macOS, 3.12 install_only; aarch64 preferred).
+          PBS_URL="$(python3 - <<'PY'
+          import json, os, urllib.request
+          api='https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest'
+          req=urllib.request.Request(api)
+          token=os.environ.get('GH_TOKEN')
+          if token:
+              req.add_header('Authorization', 'Bearer ' + token)
+          data=json.load(urllib.request.urlopen(req, timeout=60))
+          assets=data.get('assets', [])
+          for arch in ('aarch64-apple-darwin', 'x86_64-apple-darwin'):
+              for a in assets:
+                  name=a.get('name','')
+                  if 'cpython-3.12' in name and arch in name and name.endswith('install_only.tar.gz') and 'stripped' not in name:
+                      print(a['browser_download_url']); raise SystemExit
+          raise SystemExit('No suitable python-build-standalone macOS asset found')
+          PY
+          )"
+          echo "Python build-standalone: $PBS_URL"
+          curl -L --fail --retry 3 -o /tmp/pbs-macos.tar.gz "$PBS_URL"
+          tar -xzf /tmp/pbs-macos.tar.gz -C "$RUNTIME"   # extracts a 'python/' dir
+          PY="$RUNTIME/python/bin/python3"
+          "$PY" --version
+
+          # Offline wheels
+          mkdir -p "$RUNTIME/wheels"
+          "$PY" -m pip download --dest "$RUNTIME/wheels" \
+            "requests>=2.28" "beautifulsoup4>=4.12" "bottle>=0.12" "simple-websocket-server>=0.4" "aiohttp>=3.9" psutil \
+            fastapi uvicorn websockets pydantic setuptools wheel
+
+          # Runtime source (project root minus heavy/dev/build dirs) — bsdtar exclude syntax.
+          mkdir -p "$RUNTIME/app"
+          tar \
+            --exclude='.git' --exclude='.github' \
+            --exclude='frontends/desktop/src-tauri' \
+            --exclude='frontends/desktop/node_modules' \
+            --exclude='desktop_release' --exclude='docs' \
+            --exclude='assets/demo' --exclude='assets/images' \
+            --exclude='assets/GenericAgent_Technical_Report.pdf' \
+            --exclude='artifacts' \
+            --exclude='*/node_modules' --exclude='*/target' \
+            --exclude='*/.venv' --exclude='.venv' \
+            --exclude='*/__pycache__' --exclude='*.pyc' \
+            -cf - . | tar -xf - -C "$RUNTIME/app"
+          test -f "$RUNTIME/app/agentmain.py"
+          test -f "$RUNTIME/app/frontends/desktop_bridge.py"
+          test -f "$RUNTIME/app/frontends/desktop/static/index.html"
+
+          # One-click launcher: strips the com.apple.quarantine attribute the OS adds to
+          # downloaded files, then opens the app (sidesteps the "damaged" Gatekeeper error).
+          cat > "$PKG/Start GenericAgent.command" <<'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          xattr -cr "$DIR/GenericAgent.app" 2>/dev/null || true
+          open "$DIR/GenericAgent.app"
+          EOF
+          chmod +x "$PKG/Start GenericAgent.command"
+
+          cat > "$PKG/安装使用说明_Install_Guide.txt" <<'EOF'
+          ================ 中文 ================
+          GenericAgent Desktop — macOS 便携版（自包含）
+
+          无需安装 Python、无需联网装依赖、无需源码仓库——全部已内置。
+
+          前置条件
+          - macOS（Apple Silicon 或 Intel）
+
+          使用
+          推荐：双击 “Start GenericAgent.command” 启动——它会自动清除 macOS 下载隔离标记
+          （com.apple.quarantine）后打开 app，避免“GenericAgent.app 已损坏”提示。
+
+          也可直接双击 GenericAgent.app。若系统提示已损坏或来自未知开发者：
+          - 右键 GenericAgent.app -> 打开，或在 系统设置 -> 隐私与安全性 中允许；
+          - 或在终端执行：xattr -cr /path/to/GenericAgent.app
+
+          首次启动会自动离线准备运行环境（建虚拟环境、装依赖），完成后进入主界面；之后秒进。
+
+          说明
+          - 想真正对话，仍需在程序里配置模型 / API Key。
+          - 请保持目录结构不变：GenericAgent.app 与 runtime/ 必须在同一目录下。
+          - runtime/ 是内置运行环境与源码，正常使用无需改动。
+
+          ================ English ================
+          GenericAgent Desktop — macOS Portable (self-contained)
+
+          No Python install, no internet for dependencies, no source checkout — everything is bundled.
+
+          Requirements
+          - macOS (Apple Silicon or Intel)
+
+          Usage
+          Recommended: double-click "Start GenericAgent.command". It clears the macOS download
+          quarantine attribute (com.apple.quarantine) and then opens the app, avoiding the
+          "GenericAgent.app is damaged" prompt.
+
+          You can also double-click GenericAgent.app directly. If macOS says it is damaged or from
+          an unidentified developer:
+          - Right-click GenericAgent.app -> Open, or allow it in System Settings -> Privacy & Security;
+          - Or run in Terminal: xattr -cr /path/to/GenericAgent.app
+
+          The first launch prepares the runtime offline (creates a venv, installs deps), then opens
+          the main window; subsequent launches start instantly.
+
+          Notes
+          - To actually chat, configure a model / API key inside the app.
+          - Keep the folder layout intact: GenericAgent.app and runtime/ must stay in the same directory.
+          - runtime/ holds the bundled runtime and source; no need to touch it.
+          EOF
+          sed -i '' 's/^          //' "$PKG/安装使用说明_Install_Guide.txt"
+
+          ( cd "$PKG" && \
+            shasum -a 256 "安装使用说明_Install_Guide.txt" "Start GenericAgent.command" > SHA256SUMS-macos.txt && \
+            find GenericAgent.app runtime -type f -print0 | sort -z | xargs -0 shasum -a 256 >> SHA256SUMS-macos.txt )
+
+          mkdir -p artifacts/macos/out
+          ( cd artifacts/macos && zip -qry out/GenericAgent-Desktop-macOS-Portable.zip GenericAgent-Desktop-macOS-Portable )
+          cp "$PKG/SHA256SUMS-macos.txt" artifacts/macos/out/SHA256SUMS-macos.txt
+
+          echo "Package tree (top levels):"
+          find "$PKG" -maxdepth 2 -print | sort | head -60
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenericAgent-Desktop-macOS-Portable-${{ github.run_number }}
+          path: artifacts/macos/out/*
+          if-no-files-found: error
+
+      - name: Publish into unified Release (tag push only)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${{ github.ref_name }}"
+          TITLE="GenericAgent Desktop Portable ${TAG_NAME}"
+          NOTES="Self-contained desktop portable packages (Windows / Linux / macOS). Extract anywhere and run GenericAgent; the first launch prepares the bundled Python env offline."
+          gh release create "$TAG_NAME" --target "${{ github.sha }}" --title "$TITLE" --notes "$NOTES" --prerelease || true
+          gh release upload "$TAG_NAME" artifacts/macos/out/* --clobber
