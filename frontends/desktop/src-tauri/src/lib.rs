@@ -476,8 +476,9 @@ fn show_port_busy(handle: &tauri::AppHandle, ports: &str) {
     }).collect();
     let url = tauri::Url::parse(&format!("port_busy.html?ports={}", encoded)).unwrap();
     let app = handle.clone();
+    let app_in = app.clone();
     let _ = app.run_on_main_thread(move || {
-        if let Some(w) = app.get_webview_window("main") {
+        if let Some(w) = app_in.get_webview_window("main") {
             let _ = w.navigate(url);
             let _ = w.show();
             let _ = w.set_focus();
@@ -498,8 +499,9 @@ fn ports_blocked_or_show(handle: &tauri::AppHandle) -> bool {
 
 fn open_bridge_ui(handle: &tauri::AppHandle, dev_mode: bool) {
     let app = handle.clone();
+    let app_in = app.clone();
     let _ = app.run_on_main_thread(move || {
-        if let Some(w) = app.get_webview_window("main") {
+        if let Some(w) = app_in.get_webview_window("main") {
             if let Ok(url) = tauri::Url::parse(&format!("http://127.0.0.1:{}/", BRIDGE_PORT)) {
                 let _ = w.navigate(url);
             }
@@ -522,7 +524,7 @@ fn open_bridge_ui(handle: &tauri::AppHandle, dev_mode: bool) {
             let _ = w.show();
             let _ = w.set_focus();
         }
-        if let Some(sw) = app.get_webview_window("setup") {
+        if let Some(sw) = app_in.get_webview_window("setup") {
             let _ = sw.hide();
         }
     });
@@ -662,15 +664,16 @@ pub fn run() {
                 } else {
                     // Bridge never came up -> let the user fix paths in the setup window.
                     let app = handle.clone();
+                    let app_in = app.clone();
                     let _ = app.run_on_main_thread(move || {
-                        if let Some(sw) = app.get_webview_window("setup") {
+                        if let Some(sw) = app_in.get_webview_window("setup") {
                             if dev_mode {
                                 let _ = sw.open_devtools();
                             }
                             let _ = sw.show();
                             let _ = sw.set_focus();
                         }
-                        if let Some(mw) = app.get_webview_window("main") {
+                        if let Some(mw) = app_in.get_webview_window("main") {
                             let _ = mw.hide();
                         }
                     });
