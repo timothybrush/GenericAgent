@@ -33,6 +33,7 @@ fn find_bridge_script() -> PathBuf {
 /// Directory next to which a self-contained bundle keeps its runtime/ folder.
 /// Windows: the exe's folder. Linux: the .AppImage's folder ($APPIMAGE) when launched as an
 /// AppImage (current_exe would otherwise point inside the read-only squashfs mount).
+/// macOS portable package: the folder containing GenericAgent.app and runtime/.
 fn bundle_anchor_dir() -> Option<PathBuf> {
     #[cfg(not(windows))]
     {
@@ -42,7 +43,27 @@ fn bundle_anchor_dir() -> Option<PathBuf> {
             }
         }
     }
-    Some(std::env::current_exe().ok()?.parent()?.to_path_buf())
+
+    let exe = std::env::current_exe().ok()?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // current_exe() inside a bundle is:
+        //   <package>/GenericAgent.app/Contents/MacOS/GenericAgent
+        // The portable runtime sits next to the .app:
+        //   <package>/runtime/app/agentmain.py
+        let mut d = exe.parent();
+        while let Some(dir) = d {
+            if dir.extension().and_then(|s| s.to_str()) == Some("app") {
+                if let Some(parent) = dir.parent() {
+                    return Some(parent.to_path_buf());
+                }
+            }
+            d = dir.parent();
+        }
+    }
+
+    Some(exe.parent()?.to_path_buf())
 }
 
 /// Embedded interpreter inside the bundle's runtime/python (base python, before venv).
@@ -134,9 +155,24 @@ fn settings_path() -> PathBuf {
         .join(".ga_desktop_settings.json")
 }
 
-/// Read config from settings file, or auto-discover and save
+/// Read config from settings file, or auto-discover and save.
+/// Self-contained bundles always prefer their own runtime/app over stale user settings,
+/// otherwise an old ~/.ga_desktop_settings.json can silently point the UI at a different checkout.
 pub fn get_or_discover_config() -> (String, String) {
     let path = settings_path();
+
+    if bundle_root().is_some() {
+        let python = find_python();
+        let project = find_project_dir().unwrap_or_default();
+        if !python.is_empty() && !project.is_empty() {
+            let json = serde_json::json!({
+                "python_path": python,
+                "project_dir": project
+            });
+            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap());
+            return (python, project);
+        }
+    }
 
     // Try reading existing settings
     if path.exists() {
@@ -211,7 +247,12 @@ fn run_offline_prepare(project_dir: &str, report: &dyn Fn(i32, &str)) -> Result<
         root.join("install_windows.ps1"),
         root.join("python").join("python.exe"),
     );
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let (script, py) = (
+        root.join("install_macos.sh"),
+        root.join("python").join("bin").join("python3"),
+    );
+    #[cfg(all(not(windows), not(target_os = "macos")))]
     let (script, py) = (
         root.join("install_linux.sh"),
         root.join("python").join("bin").join("python3"),

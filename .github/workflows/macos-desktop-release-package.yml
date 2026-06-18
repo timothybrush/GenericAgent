@@ -1,0 +1,192 @@
+name: Build macOS Desktop Portable Package
+
+"on":
+  push:
+    branches:
+      - test
+    paths:
+      - ".github/workflows/macos-desktop-release-package.yml"
+      - "desktop_release/scripts/macos/install_macos.sh"
+      - "frontends/desktop/**"
+  workflow_dispatch:
+    inputs:
+      upload_release:
+        description: "Upload package to GitHub prerelease"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS portable runtime package
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontends/desktop/package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: frontends/desktop
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: frontends/desktop
+        run: npm run tauri build -- --bundles app
+
+      - name: Assemble portable package
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_ROOT="artifacts/macos/GenericAgent-Desktop-macOS"
+          RUNTIME="$PKG_ROOT/runtime"
+          mkdir -p "$PKG_ROOT" "$RUNTIME"
+
+          APP_SRC="$(find frontends/desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          test -n "$APP_SRC"
+          cp -R "$APP_SRC" "$PKG_ROOT/GenericAgent.app"
+
+          cp desktop_release/scripts/macos/install_macos.sh "$RUNTIME/install_macos.sh"
+          chmod +x "$RUNTIME/install_macos.sh"
+
+          # Embedded Python (python-build-standalone, macOS universal2 preferred, 3.12 install_only).
+          PBS_URL="$(python3 - <<'PY'
+          import json, urllib.request
+          api='https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest'
+          data=json.load(urllib.request.urlopen(api, timeout=60))
+          assets=data.get('assets', [])
+          patterns=[
+            ('aarch64-apple-darwin', 'install_only.tar.gz'),
+            ('x86_64-apple-darwin', 'install_only.tar.gz'),
+          ]
+          for arch, suffix in patterns:
+              for a in assets:
+                  name=a.get('name','')
+                  if 'cpython-3.12' in name and arch in name and name.endswith(suffix) and 'stripped' not in name:
+                      print(a['browser_download_url'])
+                      raise SystemExit
+          raise SystemExit('No suitable python-build-standalone macOS asset found')
+          PY
+          )"
+          echo "Using python-build-standalone: $PBS_URL"
+          curl -L --fail --retry 3 -o /tmp/pbs-macos.tar.gz "$PBS_URL"
+          mkdir -p "$RUNTIME/python"
+          tar -xzf /tmp/pbs-macos.tar.gz -C "$RUNTIME"
+          # python-build-standalone install_only archives contain python/ at archive root.
+          test -x "$RUNTIME/python/bin/python3"
+          PY="$RUNTIME/python/bin/python3"
+          "$PY" --version
+
+          mkdir -p "$RUNTIME/wheels"
+          "$PY" -m pip download --dest "$RUNTIME/wheels" \
+            "requests>=2.28" "beautifulsoup4>=4.12" "bottle>=0.12" \
+            "simple-websocket-server>=0.4" "aiohttp>=3.9" psutil \
+            fastapi uvicorn websockets pydantic setuptools wheel
+
+          mkdir -p "$RUNTIME/app"
+          tar \
+            --exclude='.git' \
+            --exclude='artifacts' \
+            --exclude='frontends/desktop/node_modules' \
+            --exclude='frontends/desktop/src-tauri/target' \
+            --exclude='**/__pycache__' \
+            --exclude='**/.venv' \
+            -cf - . | tar -xf - -C "$RUNTIME/app"
+
+          test -f "$RUNTIME/app/agentmain.py"
+          test -f "$RUNTIME/app/frontends/desktop_bridge.py"
+          test -f "$RUNTIME/app/frontends/desktop/static/index.html"
+
+          cat > "$PKG_ROOT/README_MACOS.md" <<'EOF'
+          # GenericAgent Desktop macOS Portable
+
+          这是自包含 macOS portable 包：`GenericAgent.app`、内置 Python、离线 wheels、运行源码都在同一个目录中。
+
+          ## 使用
+
+          1. 解压后保持目录结构不变。
+          2. 双击 `GenericAgent.app` 启动。
+          3. 如果 macOS Gatekeeper 提示未知开发者，请右键 `GenericAgent.app` -> 打开，或在系统设置中允许打开。
+
+          ## 目录结构
+
+          ```text
+          GenericAgent-Desktop-macOS/
+          ├── GenericAgent.app
+          ├── README_MACOS.md
+          ├── SHA256SUMS.txt
+          └── runtime/
+              ├── python/          内置 Python
+              ├── wheels/          离线依赖
+              ├── install_macos.sh 首次准备脚本
+              └── app/             运行所需源码（含 desktop_bridge.py）
+          ```
+
+          `runtime/` 是内置运行环境与源码，正常使用无需改动。
+          EOF
+          sed -i '' 's/^          //' "$PKG_ROOT/README_MACOS.md"
+
+          (
+            cd "$PKG_ROOT"
+            shasum -a 256 README_MACOS.md > SHA256SUMS.txt
+            find GenericAgent.app runtime -type f -print0 | sort -z | xargs -0 shasum -a 256 >> SHA256SUMS.txt
+          )
+
+          mkdir -p artifacts/macos/out
+          (cd artifacts/macos && zip -qry out/GenericAgent-Desktop-macOS.zip GenericAgent-Desktop-macOS)
+          cp "$PKG_ROOT/SHA256SUMS.txt" artifacts/macos/out/SHA256SUMS-macOS.txt
+
+          echo "Package tree (top levels):"
+          find "$PKG_ROOT" -maxdepth 2 -print | sort | head -80
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GenericAgent-Desktop-macOS-Portable-${{ github.run_number }}
+          path: artifacts/macos/out/*
+          if-no-files-found: error
+
+      - name: Publish prerelease
+        if: ${{ github.event_name == 'push' || inputs.upload_release == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="desktop-test-macos-latest"
+          TITLE="GenericAgent Desktop macOS Portable (test latest)"
+          NOTES=$(cat <<'EOF'
+          macOS self-contained desktop portable package built from the test branch.
+
+          Includes:
+          - GenericAgent.app
+          - runtime/python
+          - runtime/wheels
+          - runtime/app
+          - README_MACOS.md and SHA256SUMS-macOS.txt
+          EOF
+          )
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" artifacts/macos/out/* --clobber
+          else
+            gh release create "$TAG_NAME" artifacts/macos/out/* \
+              --target "${{ github.sha }}" \
+              --title "$TITLE" \
+              --notes "$NOTES" \
+              --prerelease
+          fi
