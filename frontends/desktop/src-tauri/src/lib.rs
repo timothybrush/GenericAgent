@@ -412,6 +412,82 @@ fn bridge_child_exited() -> bool {
     }
 }
 
+fn eval_on_main(handle: &tauri::AppHandle, js: String) {
+    let handle = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(w) = handle.get_webview_window("main") {
+            let _ = w.eval(&js);
+        }
+    });
+}
+
+fn navigate_main(handle: &tauri::AppHandle, url: tauri::Url) {
+    let handle = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(w) = handle.get_webview_window("main") {
+            let _ = w.navigate(url);
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    });
+}
+
+fn show_loading_error(handle: &tauri::AppHandle, msg: &str) {
+    let js = format!(
+        "window.gaError && window.gaError({})",
+        serde_json::to_string(msg).unwrap_or_else(|_| "\"启动失败\"".to_string())
+    );
+    eval_on_main(handle, js);
+}
+
+fn show_setup_fallback(handle: &tauri::AppHandle, dev_mode: bool) {
+    let handle = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(sw) = handle.get_webview_window("setup") {
+            if dev_mode {
+                let _ = sw.open_devtools();
+            }
+            let _ = sw.show();
+            let _ = sw.set_focus();
+        }
+        if let Some(mw) = handle.get_webview_window("main") {
+            let _ = mw.hide();
+        }
+    });
+}
+
+fn open_main_to_bridge(handle: &tauri::AppHandle, dev_mode: bool) {
+    let handle = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        if let Some(w) = handle.get_webview_window("main") {
+            if let Ok(url) = tauri::Url::parse(&format!("http://127.0.0.1:{}/", BRIDGE_PORT)) {
+                let _ = w.navigate(url);
+            }
+            if dev_mode {
+                w.open_devtools();
+            } else {
+                let _ = w.eval(r#"
+                    document.addEventListener('keydown', function(e) {
+                        if (e.key === 'F12' || e.key === 'F5' ||
+                            (e.ctrlKey && e.key === 'r') ||
+                            (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+                            e.preventDefault();
+                        }
+                    });
+                    document.addEventListener('contextmenu', function(e) {
+                        e.preventDefault();
+                    });
+                "#);
+            }
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        if let Some(sw) = handle.get_webview_window("setup") {
+            let _ = sw.hide();
+        }
+    });
+}
+
 fn show_port_busy_if_blocked(handle: &tauri::AppHandle) -> bool {
     if let Some(ports) = blocked_ports_label() {
         eprintln!("[tauri] ports blocked: {}", ports);
@@ -482,11 +558,7 @@ fn show_port_busy(handle: &tauri::AppHandle, ports: &str) {
         _ => c.to_string(),
     }).collect();
     let url = tauri::Url::parse(&format!("port_busy.html?ports={}", encoded)).unwrap();
-    if let Some(w) = handle.get_webview_window("main") {
-        let _ = w.navigate(url);
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    navigate_main(handle, url);
 }
 
 #[tauri::command]
@@ -540,6 +612,12 @@ pub fn run() {
 
     let project_dir = find_project_dir().unwrap_or_default();
     let needs_prepare = needs_first_run_prepare(&project_dir);
+    eprintln!(
+        "[tauri] startup: project_dir={:?} needs_prepare={} bundle={:?}",
+        project_dir,
+        needs_prepare,
+        bundle_root().map(|p| p.display().to_string())
+    );
 
     let early_port_busy: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let mut spawned_bridge = false;
@@ -592,17 +670,15 @@ pub fn run() {
                     return;
                 }
 
-                // Progress reporter: push status into the loading window (window.gaProgress).
-                let main_win = handle.get_webview_window("main");
-                let report = |pct: i32, msg: &str| {
-                    if let Some(w) = &main_win {
-                        let js = format!(
-                            "window.gaProgress && window.gaProgress({}, {})",
-                            pct,
-                            serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string())
-                        );
-                        let _ = w.eval(&js);
-                    }
+                // Progress reporter: must run on the WebView main thread (Windows WebView2).
+                let handle_report = handle.clone();
+                let report = move |pct: i32, msg: &str| {
+                    let js = format!(
+                        "window.gaProgress && window.gaProgress({}, {})",
+                        pct,
+                        serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string())
+                    );
+                    eval_on_main(&handle_report, js);
                 };
 
                 // First-run (self-contained bundle): prepare the embedded python env offline,
@@ -611,8 +687,7 @@ pub fn run() {
                     report(5, "start");
                     if let Err(e) = run_offline_prepare(&project_dir, &report) {
                         eprintln!("[tauri] first-run prepare failed: {}", e);
-                        if let Some(sw) = handle.get_webview_window("setup") { let _ = sw.show(); }
-                        if let Some(mw) = handle.get_webview_window("main") { let _ = mw.hide(); }
+                        show_loading_error(&handle, &format!("首次环境准备失败：{}", e));
                         return;
                     }
                     report(95, "starting");
@@ -648,41 +723,15 @@ pub fn run() {
                 let bridge_ready = wait_for_port(BRIDGE_PORT, wait);
 
                 if bridge_ready {
-                    // Navigate to the bridge HTTP only after it is ready.
-                    if let Some(w) = handle.get_webview_window("main") {
-                        if let Ok(url) = tauri::Url::parse(&format!("http://127.0.0.1:{}/", BRIDGE_PORT)) {
-                            let _ = w.navigate(url);
-                        }
-                        if dev_mode {
-                            w.open_devtools();
-                        } else {
-                            // Disable F5/F12/Ctrl+R/right-click in production
-                            let _ = w.eval(r#"
-                                document.addEventListener('keydown', function(e) {
-                                    if (e.key === 'F12' || e.key === 'F5' ||
-                                        (e.ctrlKey && e.key === 'r') ||
-                                        (e.ctrlKey && e.shiftKey && e.key === 'I')) {
-                                        e.preventDefault();
-                                    }
-                                });
-                                document.addEventListener('contextmenu', function(e) {
-                                    e.preventDefault();
-                                });
-                            "#);
-                        }
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
-                    if let Some(sw) = handle.get_webview_window("setup") { let _ = sw.hide(); }
+                    open_main_to_bridge(&handle, dev_mode);
                 } else if show_port_busy_if_blocked(&handle) {
-                    // Ports taken by an orphan bridge/conductor — port_busy.html already shown.
+                    // port_busy.html shown on main window.
                 } else {
-                    // Bridge never came up -> let the user fix paths in the setup window.
-                    if let Some(sw) = handle.get_webview_window("setup") {
-                        if dev_mode { sw.open_devtools(); }
-                        let _ = sw.show();
-                    }
-                    if let Some(mw) = handle.get_webview_window("main") { let _ = mw.hide(); }
+                    show_loading_error(
+                        &handle,
+                        "服务启动超时。请检查 runtime\\app\\.venv 是否生成，或手动运行 runtime\\install_windows.ps1 查看报错。",
+                    );
+                    show_setup_fallback(&handle, dev_mode);
                 }
             });
             Ok(())
