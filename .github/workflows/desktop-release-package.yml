@@ -345,8 +345,9 @@ jobs:
           tar -C artifacts/linux -czf artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz GenericAgent-Desktop-Linux-Portable
           ( cd artifacts/linux/out && sha256sum GenericAgent-Desktop-Linux-Portable.tar.gz > SHA256SUMS-linux.txt )
 
-          echo "Package contents:"
-          tar -tzf artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz | head -40
+          tar -tzf artifacts/linux/out/GenericAgent-Desktop-Linux-Portable.tar.gz > /tmp/pkglist.txt
+          echo "Package contents (first 40 of $(wc -l < /tmp/pkglist.txt) entries):"
+          head -40 /tmp/pkglist.txt
           ls -lh artifacts/linux/out
 
       - name: Upload workflow artifact
