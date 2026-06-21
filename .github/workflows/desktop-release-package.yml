@@ -281,6 +281,8 @@ jobs:
           # Stable internal name so the generated .desktop Exec= never changes on upgrades.
           cp "$APPIMAGE_SRC" "$PKG/GenericAgent.AppImage"
           chmod +x "$PKG/GenericAgent.AppImage"
+          # Icon for the generated .desktop launcher (Icon= needs a real image file on Linux).
+          cp frontends/desktop/src-tauri/icons/icon.png "$PKG/GenericAgent.png"
           cp desktop_release/scripts/linux/install_linux.sh "$RUNTIME/install_linux.sh"
           chmod +x "$RUNTIME/install_linux.sh"
           # Uninstaller: top-level entry next to the AppImage.

@@ -225,10 +225,17 @@ fn ensure_desktop_shortcut() {
     let Some(target) = std::env::var_os("APPIMAGE").map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok()) else { return; };
     let exec = target.to_string_lossy().replace('"', "");
+    // Linux .desktop Icon= needs an image file (or themed name), not the AppImage path. The CI
+    // ships GenericAgent.png next to the AppImage; fall back to a generic themed icon otherwise.
+    let icon = bundle_anchor_dir()
+        .map(|d| d.join("GenericAgent.png"))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "application-x-executable".to_string());
     let entry = format!(
         "[Desktop Entry]\nType=Application\nName=GenericAgent\nComment=GenericAgent Desktop\n\
-         Exec=\"{exec}\"\nIcon={exec}\nTerminal=false\nCategories=Utility;Development;\n",
-        exec = exec
+         Exec=\"{exec}\"\nIcon={icon}\nTerminal=false\nCategories=Utility;Development;\n",
+        exec = exec, icon = icon
     );
     let write_desktop = |path: &std::path::Path| {
         if std::fs::write(path, &entry).is_ok() {
