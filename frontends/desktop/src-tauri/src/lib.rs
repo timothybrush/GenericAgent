@@ -148,6 +148,110 @@ fn settings_path() -> PathBuf {
         .join(".ga_desktop_settings.json")
 }
 
+/// Read the settings file as a JSON object (empty object when missing/unparseable).
+fn read_settings() -> serde_json::Map<String, serde_json::Value> {
+    let path = settings_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(serde_json::Value::Object(m)) = serde_json::from_str(&content) {
+            return m;
+        }
+    }
+    serde_json::Map::new()
+}
+
+/// Merge `updates` into the existing settings file and write it back, preserving any keys
+/// we don't touch. The old code rewrote the file with only python_path/project_dir, which
+/// would silently drop sibling keys like `desktop_shortcut`. Always go through here.
+fn merge_settings(updates: serde_json::Value) {
+    let mut obj = read_settings();
+    if let serde_json::Value::Object(m) = updates {
+        for (k, v) in m {
+            obj.insert(k, v);
+        }
+    }
+    let val = serde_json::Value::Object(obj);
+    if let Ok(text) = serde_json::to_string_pretty(&val) {
+        let _ = std::fs::write(settings_path(), text);
+    }
+}
+
+/// Desktop-shortcut preference stored in settings under `desktop_shortcut`.
+/// None  = never asked (first run)
+/// Some(true)/Some(false) = user's remembered choice.
+fn read_shortcut_pref() -> Option<bool> {
+    read_settings().get("desktop_shortcut").and_then(|v| v.as_bool())
+}
+
+fn write_shortcut_pref(enabled: bool) {
+    merge_settings(serde_json::json!({ "desktop_shortcut": enabled }));
+}
+
+/// Create (or overwrite) a desktop shortcut pointing at the CURRENT exe. Overwriting on every
+/// enabled launch is what makes the portable bundle relocatable: move the folder, relaunch, and
+/// the shortcut is rewritten to the new path. Windows-only (uses a .lnk via WScript.Shell).
+#[cfg(windows)]
+fn ensure_desktop_shortcut() {
+    let Ok(exe) = std::env::current_exe() else { return; };
+    let Some(desktop) = dirs::desktop_dir() else { return; };
+    let lnk = desktop.join("GenericAgent.lnk");
+    let work_dir = exe.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| exe.clone());
+
+    let exe_s = exe.to_string_lossy().replace('\'', "''");
+    let lnk_s = lnk.to_string_lossy().replace('\'', "''");
+    let work_s = work_dir.to_string_lossy().replace('\'', "''");
+
+    // Build the shortcut via WScript.Shell COM, consistent with the existing powershell usage
+    // elsewhere in this file. No extra crate needed.
+    let script = format!(
+        "$ws = New-Object -ComObject WScript.Shell; \
+         $sc = $ws.CreateShortcut('{lnk}'); \
+         $sc.TargetPath = '{exe}'; \
+         $sc.WorkingDirectory = '{work}'; \
+         $sc.IconLocation = '{exe}'; \
+         $sc.Save()",
+        lnk = lnk_s, exe = exe_s, work = work_s
+    );
+
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script]);
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let _ = cmd.status();
+}
+
+#[cfg(not(windows))]
+fn ensure_desktop_shortcut() {}
+
+/// First-run shortcut handling. Windows portable bundles only. Asks once via a native dialog,
+/// remembers the choice, and self-heals the shortcut path on every enabled launch.
+fn maybe_setup_shortcut() {
+    // Only for the self-contained Windows portable bundle; skip dev builds and other platforms.
+    #[cfg(not(windows))]
+    { return; }
+
+    #[cfg(windows)]
+    {
+        if bundle_root().is_none() {
+            return;
+        }
+        match read_shortcut_pref() {
+            Some(true) => ensure_desktop_shortcut(),
+            Some(false) => {}
+            None => {
+                let create = rfd::MessageDialog::new()
+                    .set_title("GenericAgent")
+                    .set_description("是否在桌面创建 GenericAgent 快捷方式？\nCreate a desktop shortcut for GenericAgent?")
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show();
+                let enabled = matches!(create, rfd::MessageDialogResult::Yes);
+                write_shortcut_pref(enabled);
+                if enabled {
+                    ensure_desktop_shortcut();
+                }
+            }
+        }
+    }
+}
+
 /// True when this binary is running from inside a macOS .app bundle (packaged build).
 /// Used to refuse stale ~/.ga_desktop_settings.json that could point at an old checkout
 /// when App Translocation hides our own runtime/ from current_exe().
@@ -173,11 +277,10 @@ pub fn get_or_discover_config() -> (String, String) {
         let python = find_python();
         let project = find_project_dir().unwrap_or_default();
         if !python.is_empty() && !project.is_empty() {
-            let json = serde_json::json!({
+            merge_settings(serde_json::json!({
                 "python_path": python,
                 "project_dir": project
-            });
-            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap());
+            }));
             return (python, project);
         }
     }
@@ -217,11 +320,10 @@ pub fn get_or_discover_config() -> (String, String) {
 
     // Save discovered config
     if !python.is_empty() && !project.is_empty() {
-        let json = serde_json::json!({
+        merge_settings(serde_json::json!({
             "python_path": python,
             "project_dir": project
-        });
-        let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap());
+        }));
     }
 
     (python, project)
@@ -463,11 +565,8 @@ fn show_bridge_window(app_handle: &tauri::AppHandle) {
 
 #[tauri::command]
 fn start_bridge_with_config(app_handle: tauri::AppHandle, python_path: String, project_dir: String) -> Result<(), String> {
-    // Save to settings
-    let path = settings_path();
-    let obj = serde_json::json!({"python_path": python_path, "project_dir": project_dir});
-    std::fs::write(&path, serde_json::to_string_pretty(&obj).unwrap())
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
+    // Save to settings (merge so sibling keys like desktop_shortcut survive).
+    merge_settings(serde_json::json!({"python_path": python_path, "project_dir": project_dir}));
 
     spawn_bridge_process(&python_path, &project_dir)?;
 
@@ -655,6 +754,9 @@ pub fn run() {
                         let _ = w.set_focus();
                     }
                     if let Some(sw) = handle.get_webview_window("setup") { let _ = sw.hide(); }
+                    // App is up and reachable: ask-once / self-heal the desktop shortcut.
+                    // Runs last so it never blocks the loading/navigation path.
+                    maybe_setup_shortcut();
                 } else {
                     // Bridge never came up -> let the user fix paths in the setup window.
                     if let Some(sw) = handle.get_webview_window("setup") {
