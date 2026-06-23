@@ -88,7 +88,7 @@ LLM_PROVIDERS = [
         'type': 'native_oai',
         'template': {
             'name': 'deepseek', 'apikey': 'sk-<your-deepseek-key>',
-            'apibase': 'https://api.deepseek.com', 'model': 'deepseek-v4-flash',
+            'apibase': 'https://api.deepseek.com', 'model': 'deepseek-v4-pro',
             'api_mode': 'chat_completions', 'reasoning_effort': 'high',
         },
         'key_hint': '在 https://platform.deepseek.com/api_keys 获取',
@@ -126,11 +126,11 @@ LLM_PROVIDERS = [
         'template': {
             'name': 'qwen', 'apikey': 'sk-<your-dashscope-key>',
             'apibase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-            'model': 'qwen3.5-plus',
+            'model': 'qwen3.6-max-preview',
             'api_mode': 'chat_completions',
         },
         'key_hint': '在 https://bailian.console.aliyun.com/ 获取 API Key',
-        'model_choices': ['qwen3.5-plus', 'qwen3-coder-plus'],
+        'model_choices': ['qwen3.6-max-preview', 'qwen3.5-plus', 'qwen3-coder-plus'],
         'extra_fields': [
             {
                 'key': '_endpoint', 'label': '选择端点',

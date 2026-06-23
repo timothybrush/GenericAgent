@@ -965,6 +965,8 @@ class MixinSession:
     def primary(self): return self._sessions[0]
     @property
     def model(self): return getattr(self._sessions[self._cur_idx], 'model', None)
+    @property
+    def current_name(self): return getattr(self._sessions[self._cur_idx], 'name', None)
     def _pick(self):
         if self._cur_idx and time.time() - self._switched_at > self._spring_sec: self._cur_idx = 0
         return self._cur_idx

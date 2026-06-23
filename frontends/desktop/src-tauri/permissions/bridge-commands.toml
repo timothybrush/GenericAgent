@@ -1,0 +1,29 @@
+[[permission]]
+identifier = "allow-start-bridge"
+description = "Spawn bridge from the services panel when bridge was stopped."
+commands.allow = ["start_bridge"]
+
+[[permission]]
+identifier = "allow-start-bridge-with-config"
+description = "Spawn bridge from setup with explicit python/project paths."
+commands.allow = ["start_bridge_with_config"]
+
+[[permission]]
+identifier = "allow-get-config"
+description = "Read saved bridge spawn configuration."
+commands.allow = ["get_config"]
+
+[[permission]]
+identifier = "allow-export-mykey"
+description = "Save mykey.py via native file dialog."
+commands.allow = ["export_mykey"]
+
+[[permission]]
+identifier = "allow-shortcut-should-ask"
+description = "Check whether to show the first-run desktop-shortcut prompt."
+commands.allow = ["shortcut_should_ask"]
+
+[[permission]]
+identifier = "allow-shortcut-decide"
+description = "Persist the user's desktop-shortcut choice and create it if enabled."
+commands.allow = ["shortcut_decide"]

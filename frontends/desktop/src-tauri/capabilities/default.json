@@ -2,6 +2,9 @@
   "identifier": "default",
   "description": "Default capabilities for all windows",
   "windows": ["main", "setup"],
+  "remote": {
+    "urls": ["http://127.0.0.1:14168", "http://localhost:14168"]
+  },
   "permissions": [
     "core:default",
     "core:window:default",
@@ -10,6 +13,12 @@
     "core:window:allow-set-focus",
     "core:window:allow-close",
     "core:window:allow-get-all-windows",
-    "core:webview:default"
+    "core:webview:default",
+    "allow-start-bridge",
+    "allow-start-bridge-with-config",
+    "allow-get-config",
+    "allow-export-mykey",
+    "allow-shortcut-should-ask",
+    "allow-shortcut-decide"
   ]
 }

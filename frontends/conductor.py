@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,17 +18,43 @@ PORT = 8900
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conductor.html")
 
 
+def _desktop_llm_no() -> Optional[int]:
+    """Read the model index the user picked in the desktop UI.
+    Persisted by the bridge at ~/.ga_desktop_settings.json under ui.llmNo.
+    Returns None when unavailable, so callers keep the agent's default model."""
+    try:
+        from pathlib import Path
+        doc = json.loads((Path.home() / ".ga_desktop_settings.json").read_text(encoding="utf-8"))
+        no = (doc.get("ui") or {}).get("llmNo")
+        return int(no) if no is not None else None
+    except Exception:
+        return None
+
+
+def _apply_desktop_model(agent: "GenericAgent") -> None:
+    """Switch a freshly built agent to the desktop-selected model (if any)."""
+    no = _desktop_llm_no()
+    if no is None:
+        return
+    try:
+        agent.next_llm(int(no))
+    except Exception as e:
+        print(f"[conductor] failed to apply desktop model #{no}: {e}", file=sys.stderr)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 服务启动（事件循环已就绪）：捕获 loop 供工作线程跨线程推 WS 广播，并起主agent
     global main_loop
     main_loop = asyncio.get_running_loop()
+    import cost_tracker; cost_tracker.install()
     conductor.start()
     threading.Thread(target=im_poll_loop, name="im-poller", daemon=True).start()
     yield
 
 
 app = FastAPI(title="Conductor", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 class ChatIn(BaseModel):
     msg: str
@@ -114,8 +141,8 @@ async def broadcast(payload: dict):
 
 def push_cards(): schedule_broadcast({"type": "subagents", "items": pool.snapshot()})
 
-def add_chat(msg: str, role: str = "conductor"):
-    item = {"id": short_id(), "role": role, "msg": msg, "ts": now_ms(), "read": role != "user"}
+def add_chat(msg: str, role: str = "conductor", files: list = None, images: list = None):
+    item = {"id": short_id(), "role": role, "msg": msg, "ts": now_ms(), "read": role != "user", "files": files or [], "images": images or []}
     chat_messages.append(item)
     if len(chat_messages) > 200: del chat_messages[:-200]
     schedule_broadcast({"type": "chat", "item": item})
@@ -194,6 +221,7 @@ class SubagentPool:
         agent.inc_out = True
         agent.verbose = False
         agent.no_print = True
+        _apply_desktop_model(agent)
         th = start_agent_runner(agent, f"subagent-{sid}")
         state = SubAgentState(id=sid, agent=agent, prompt=prompt, status="running", thread=th)
         with self.lock: self.subagents[sid] = state
@@ -346,6 +374,9 @@ API: {base}；requests，GET /readme查用法，GET /chat读未读对话，GET /
                     break
             try:
                 prompt = self._build_prompt(events)
+                # Follow the desktop-selected model live: re-read before each task
+                # so switching models in the UI takes effect without restarting.
+                _apply_desktop_model(self.agent)
                 dq = self.agent.put_task(prompt, source="conductor")
                 self._drain(dq, events)
             except Exception as e: print(f"Conductor error: {e}")
@@ -380,6 +411,11 @@ def im_poll_loop():
             except Exception: continue
             last_fire[name] = now
             conductor.notify({"type": "im_signal", "source": name})
+
+@app.get("/token-stats")
+def conductor_token_stats():
+    import cost_tracker
+    return {"records": [{"thread": k, "input": v.input, "output": v.output, "cacheCreate": v.cache_create, "cacheRead": v.cache_read} for k, v in cost_tracker.all_trackers().items()]}
 
 @app.get("/")
 def index(): return FileResponse(HTML_PATH)
@@ -462,17 +498,22 @@ async def websocket(ws: WebSocket):
     await ws.accept()
     ws_clients.add(ws)
     try:
-        await ws.send_json({"type": "hello", "subagents": pool.snapshot(), "chat": chat_messages, "log": conductor.log})
+        running = any(s.status == "running" for s in pool.subagents.values())
+        await ws.send_json({"type": "hello", "subagents": pool.snapshot(), "chat": chat_messages, "log": conductor.log, "running": running})
         while True:
             data = await ws.receive_json()
             msg = (data.get("msg") or "").strip()
             if not msg: continue
-            add_chat(msg, role="user")
+            add_chat(msg, role="user", files=data.get("files") or [], images=data.get("images") or [])
             conductor.notify({"type": "user_message", "msg": msg})
     except WebSocketDisconnect: pass
     finally: ws_clients.discard(ws)
 
 if __name__ == "__main__":
-    import uvicorn, webbrowser, threading
-    threading.Timer(1.0, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
+    import uvicorn
+    # bridge 自启 conductor 时传 --no-browser:不在用户浏览器里弹一个独立 conductor UI,
+    # 用户从桌面版「指挥家」页直接连过来即可。手动跑 conductor.py(没带 flag)保持原行为。
+    if "--no-browser" not in sys.argv:
+        import webbrowser, threading
+        threading.Timer(1.0, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
     uvicorn.run("conductor:app", host=HOST, port=PORT, reload=False)
