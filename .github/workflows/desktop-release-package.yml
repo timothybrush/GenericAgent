@@ -72,10 +72,10 @@ jobs:
 
           # exe at the top level, named GenericAgent (typical portable form)
           cp "$EXE_SRC" "$PKG/GenericAgent.exe"
-          cp desktop_release/scripts/windows/install_windows.ps1 "$RUNTIME/install_windows.ps1"
+          cp frontends/desktop/packaging/scripts/windows/install_windows.ps1 "$RUNTIME/install_windows.ps1"
           # Uninstaller: double-click entry at top level, worker script under runtime/.
-          cp desktop_release/scripts/windows/uninstall.bat "$PKG/uninstall.bat"
-          cp desktop_release/scripts/windows/uninstall_windows.ps1 "$RUNTIME/uninstall_windows.ps1"
+          cp frontends/desktop/packaging/scripts/windows/uninstall.bat "$PKG/uninstall.bat"
+          cp frontends/desktop/packaging/scripts/windows/uninstall_windows.ps1 "$RUNTIME/uninstall_windows.ps1"
 
           # Embedded Python (python-build-standalone, windows x86_64, 3.12 install_only).
           # browser_download_url is URL-encoded ('+' -> '%2B'); match loosely with '.*'.
@@ -102,7 +102,7 @@ jobs:
             --exclude='./.git' --exclude='./.github' \
             --exclude='./frontends/desktop/src-tauri' \
             --exclude='./frontends/desktop/node_modules' \
-            --exclude='./desktop_release' --exclude='./docs' \
+            --exclude='./frontends/desktop/packaging' --exclude='./docs' \
             --exclude='./assets/demo' --exclude='./assets/images' \
             --exclude='./assets/GenericAgent_Technical_Report.pdf' \
             --exclude='./artifacts' \
@@ -285,10 +285,10 @@ jobs:
           chmod +x "$PKG/GenericAgent.AppImage"
           # Icon for the generated .desktop launcher (Icon= needs a real image file on Linux).
           cp frontends/desktop/src-tauri/icons/icon.png "$PKG/GenericAgent.png"
-          cp desktop_release/scripts/linux/install_linux.sh "$RUNTIME/install_linux.sh"
+          cp frontends/desktop/packaging/scripts/linux/install_linux.sh "$RUNTIME/install_linux.sh"
           chmod +x "$RUNTIME/install_linux.sh"
           # Uninstaller: top-level entry next to the AppImage.
-          cp desktop_release/scripts/linux/uninstall.sh "$PKG/uninstall.sh"
+          cp frontends/desktop/packaging/scripts/linux/uninstall.sh "$PKG/uninstall.sh"
           chmod +x "$PKG/uninstall.sh"
 
           # Embedded Python (python-build-standalone, linux x86_64, 3.12 install_only).
@@ -315,7 +315,7 @@ jobs:
             --exclude='./.git' --exclude='./.github' \
             --exclude='./frontends/desktop/src-tauri' \
             --exclude='./frontends/desktop/node_modules' \
-            --exclude='./desktop_release' --exclude='./docs' \
+            --exclude='./frontends/desktop/packaging' --exclude='./docs' \
             --exclude='./assets/demo' --exclude='./assets/images' \
             --exclude='./assets/GenericAgent_Technical_Report.pdf' \
             --exclude='./artifacts' \
@@ -482,7 +482,7 @@ jobs:
           # 2) Standard DMG: GenericAgent.app with runtime embedded in Contents/Resources/runtime.
           RUNTIME_SRC="artifacts/macos/runtime-src"
           mkdir -p "$RUNTIME_SRC"
-          cp desktop_release/scripts/macos/install_macos.sh "$RUNTIME_SRC/install_macos.sh"
+          cp frontends/desktop/packaging/scripts/macos/install_macos.sh "$RUNTIME_SRC/install_macos.sh"
           chmod +x "$RUNTIME_SRC/install_macos.sh"
 
           # Embedded Python (python-build-standalone, macOS, 3.12 install_only; aarch64 preferred).
@@ -521,7 +521,7 @@ jobs:
             --exclude='.git' --exclude='.github' \
             --exclude='frontends/desktop/src-tauri' \
             --exclude='frontends/desktop/node_modules' \
-            --exclude='desktop_release' --exclude='docs' \
+            --exclude='frontends/desktop/packaging' --exclude='docs' \
             --exclude='assets/demo' --exclude='assets/images' \
             --exclude='assets/GenericAgent_Technical_Report.pdf' \
             --exclude='artifacts' \
@@ -541,7 +541,7 @@ jobs:
           # Portable zip: keep the existing release shape and helper scripts.
           ditto "$APP_SRC" "$PORTABLE/GenericAgent.app"
           ditto "$RUNTIME_SRC" "$PORTABLE/runtime"
-          cp desktop_release/scripts/macos/uninstall.command "$PORTABLE/uninstall.command"
+          cp frontends/desktop/packaging/scripts/macos/uninstall.command "$PORTABLE/uninstall.command"
           chmod +x "$PORTABLE/uninstall.command"
           cat > "$PORTABLE/Start GenericAgent.command" <<'EOF'
           #!/bin/bash

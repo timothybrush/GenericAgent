@@ -57,19 +57,19 @@ SHA256SUMS.txt
 
 ```powershell
 # 在仓库根目录执行
-.\desktop_release\scripts\windows\install_windows.ps1
+.\frontends\desktop\packaging\scripts\windows\install_windows.ps1
 ```
 
 环境配置脚本 Linux 可参考：
 
 ```bash
-chmod +x desktop_release/scripts/linux/install_linux.sh
-./desktop_release/scripts/linux/install_linux.sh --mode PrepareOnly
+chmod +x frontends/desktop/packaging/scripts/linux/install_linux.sh
+./frontends/desktop/packaging/scripts/linux/install_linux.sh --mode PrepareOnly
 chmod +x GenericAgent-Desktop-Linux.AppImage
 ./GenericAgent-Desktop-Linux.AppImage
 ```
 
-说明：Linux 脚本 `desktop_release/scripts/linux/install_linux.sh` 目前作为参考实现使用，已在 Ubuntu 24.04.4 LTS x64 上做过初步试用，但仍需按清单做完整验证。脚本核心做法是准备运行环境，并写入用户级桌面配置（如 `~/.ga_desktop_settings.json`），让程序壳能找到 `project_dir`、`python_path` 和 bridge 脚本。
+说明：Linux 脚本 `frontends/desktop/packaging/scripts/linux/install_linux.sh` 目前作为参考实现使用，已在 Ubuntu 24.04.4 LTS x64 上做过初步试用，但仍需按清单做完整验证。脚本核心做法是准备运行环境，并写入用户级桌面配置（如 `~/.ga_desktop_settings.json`），让程序壳能找到 `project_dir`、`python_path` 和 bridge 脚本。
 
 ### 任务 2：Release 不可用时的升级路径
 
@@ -80,6 +80,6 @@ chmod +x GenericAgent-Desktop-Linux.AppImage
 
 ### 任务 3：核心功能兼容性测试
 
-Release 产物可以启动并连上后端后，再根据 `desktop_release/CHECKLIST.md` 测试不同平台下的界面和核心功能兼容性。
+Release 产物可以启动并连上后端后，再根据 `frontends/desktop/packaging/CHECKLIST.md` 测试不同平台下的界面和核心功能兼容性。
 
 ---
