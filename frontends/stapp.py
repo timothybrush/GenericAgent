@@ -75,8 +75,10 @@ def build_prompt(objective):
     return f"""读取 {agent.log_path} 尾部，获取 agent 的最新输出。
 用户的 loop 诉求：<objective>{objective}</objective>
 判断该 agent 是否偷懒、是否真正完成诉求，用 <next_prompt></next_prompt> 输出要追加给它的指令：
-一般复述 objective，或不超过 10 字的督促，如：别停，继续 / 这就叫最优？你优化到位了吗 / 看我要求，你达成了吗 / 你好好看清楚 / 你能不能看看记忆
-只输出 <next_prompt>…</next_prompt>。"""
+一般复述 objective，或不超过 10 字的**督促**，如：别停，继续 / 这就叫最优？你优化到位了吗 / 看我要求，你达成了吗 / 你好好看清楚 / 你能不能看看记忆 / 把关键发现和阶段性成果落盘，然后继续
+不允许促进 agent 停止或代替宣告任务完成，只允许催促不要对原任务进行评价，特别**禁止**“任务已完成，结束”这种让agent结束的指令，你的任务是让agent继续loop而非停止。
+只输出 <next_prompt>…</next_prompt>，若需要停止则不要输出此tag。
+"""
 
 @st.cache_resource
 def get_controller():
@@ -386,11 +388,11 @@ elif st.session_state.get('display_queue') is not None:
 # ── 空闲自主行动：fragment 定时检测，替代 launch.pyw 的 idle_monitor ──
 @st.fragment(run_every=timedelta(minutes=1))
 def _idle_checker():
-    if st.session_state.get('loop_enabled'):                       # 循环回程:取controller回填
+    if st.session_state.get('loop_enabled'):
         b = get_controller()
         if b['ready']:
             b['ready'] = False
-            if b['out']: st.session_state['_inject_prompt'] = b['out']
+            if b['out'] and '停止循环' not in b['out']: st.session_state['_inject_prompt'] = b['out']
             else: st.session_state.loop_enabled = False
             st.rerun(scope="app")
         return
