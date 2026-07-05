@@ -1427,15 +1427,30 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
 .conv-item{ display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:4px; cursor:pointer; }
 .conv-item:hover{ background:var(--line-soft); }
 .conv-item.active{ background:var(--accent-bg); }
+.conv-item.renaming{
+  cursor:default;
+  background:color-mix(in srgb, var(--accent-bg) 70%, var(--panel));
+}
 .ci-dot{ width:7px; height:7px; border-radius:50%; background:var(--ok); flex:0 0 auto; }
 .conv-item.idle .ci-dot{ background:var(--dot-idle); }
 .ci-main{ flex:1; min-width:0; }
 .ci-title{ font-size:13px; font-weight:500; color:var(--txt-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ci-rename-input{
-  font-size:13px; font-weight:500; color:var(--txt-strong); width:100%;
-  border:1px solid var(--accent); border-radius:4px; padding:1px 4px;
-  background:var(--field-bg); outline:none;
+  display:block; width:100%; min-width:0; height:24px; box-sizing:border-box;
+  margin:-3px 0 -2px; padding:0 7px;
+  border:1px solid color-mix(in srgb, var(--accent) 44%, var(--line-strong));
+  border-radius:4px; background:var(--card); outline:none;
+  color:var(--txt-strong); caret-color:var(--accent);
+  font-family:var(--font-sans); font-size:13px; font-weight:500; line-height:22px;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+  transition:border-color .12s, box-shadow .12s, background .12s;
 }
+.ci-rename-input:focus{
+  border-color:var(--accent);
+  background:var(--field-bg);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.ci-rename-input::selection{ background:color-mix(in srgb, var(--accent) 28%, transparent); }
 .ci-pin{ width:14px; height:14px; color:var(--accent); margin-right:3px; vertical-align:-3px; flex:0 0 auto; display:inline-block; }
 .ci-meta{ font-size:11px; color:var(--muted); margin-top:2px; }
 .ci-more{
@@ -1446,6 +1461,7 @@ span.flatpickr-weekday{ color:var(--muted) !important; font-size:11px; }
 }
 .ci-more svg{ width:20px; height:20px; }
 .conv-item:hover .ci-more, .conv-item.active .ci-more{ opacity:1; }
+.conv-item.renaming .ci-more{ opacity:0; pointer-events:none; }
 .ci-more:hover{ background:var(--hover-dim); color:var(--txt-2); }
 
 .ctx-menu{

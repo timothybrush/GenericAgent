@@ -2909,6 +2909,12 @@ async function closeSession(id) {
 
 const convMenu = document.getElementById('conv-menu');
 let menuTargetId = null;
+function isSessionRowInteractiveTarget(target) {
+  const el = target instanceof Element ? target : null;
+  return !!el?.closest?.(
+    '.ci-more, .ci-rename-input, button, input, textarea, select, a, [contenteditable="true"], [data-no-session-select]'
+  );
+}
 convListEl.addEventListener('click', (e) => {
   const more = e.target.closest('.ci-more');
   if (more) {
@@ -2928,6 +2934,7 @@ convListEl.addEventListener('click', (e) => {
     convMenu.style.left = (rect.right - convMenu.offsetWidth) + 'px';
     return;
   }
+  if (isSessionRowInteractiveTarget(e.target)) return;
   const it = e.target.closest('.conv-item');
   if (it && it.dataset.id) {
     setActiveSession(it.dataset.id);
@@ -2964,8 +2971,10 @@ convMenu.addEventListener('click', (e) => {
     const titleEl = item.querySelector('.ci-title');
     if (!titleEl) return;
     const oldTitle = sess.title || '';
+    item.classList.add('renaming');
     const inp = document.createElement('input');
     inp.className = 'ci-rename-input';
+    inp.dataset.noSessionSelect = '1';
     inp.maxLength = 50;
     inp.value = oldTitle;
     titleEl.replaceWith(inp);
