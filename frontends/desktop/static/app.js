@@ -338,7 +338,7 @@ const I18N = {
     'customPreset.removeTitle': '删除',
     'customPreset.editTitle': '编辑',
     'builtinPreset.restoreBtn': '恢复默认预设',
-    'set.appearance': '外观', 'set.plainUi': '素色', 'set.fontSize': '聊天字号', 'set.lang': '语言', 'set.model': '模型', 'set.addModel': '添加模型', 'set.features': '功能', 'set.importMykey': '导入已有模型配置（mykey.py）', 'set.exportMykey': '导出当前模型配置', 'set.importMemory': '导入已有记忆与会话记录', 'set.serviceManager': '后台服务管理',
+    'set.appearance': '外观', 'set.plainUi': '素色', 'set.fontSize': '聊天字号', 'set.lang': '语言', 'set.model': '模型', 'set.addModel': '添加模型', 'set.features': '功能', 'set.importMykey': '导入已有模型配置（mykey.py）', 'set.exportMykey': '导出当前模型配置', 'set.importMemory': '导入已有记忆与会话记录（选择 GenericAgent 根目录）', 'set.serviceManager': '后台服务管理',
     'shortcut.askConfirm': '是否在桌面创建 GenericAgent 快捷方式？',
     'appearance.light': '浅色', 'appearance.dark': '深色',
     'set.noModels': '暂无模型，点击下方添加',
@@ -461,7 +461,8 @@ const I18N = {
     'sys.memoryImported': '记忆已导入',
     'err.memoryImport': '导入记忆失败',
     'sys.memoryImportBackup': '原记忆已备份至',
-    'sys.memoryImportPrompt': '请输入要导入的 GenericAgent 目录的完整路径：',
+    'sys.memoryPickTitle': '选择 GenericAgent 根目录（包含 memory 与 temp 的目录）',
+    'sys.memoryImportPrompt': '请输入 GenericAgent 根目录的完整路径（包含 memory 与 temp 的目录，而非 memory 文件夹本身）：',
     'sys.mykeyExported': '模型配置已导出',
     'st.starting': '启动中…', 'st.stopping': '停止中…', 'st.online': '在线', 'st.offline': '离线', 'st.error': '错误', 'st.running': '运行', 'st.abnormal': '异常',
     'act.configure': '配置', 'act.logs': '日志', 'act.restart': '重启', 'act.stop': '停止', 'act.start': '启动', 'act.exit': '退出',
@@ -515,7 +516,7 @@ const I18N = {
     'customPreset.removeTitle': 'Delete',
     'customPreset.editTitle': 'Edit',
     'builtinPreset.restoreBtn': 'Restore defaults',
-    'set.appearance': 'Appearance', 'set.plainUi': 'Plain', 'set.fontSize': 'Chat font size', 'set.lang': 'Language', 'set.model': 'Model', 'set.addModel': 'Add model', 'set.features': 'Features', 'set.importMykey': 'Import model config (mykey.py)', 'set.exportMykey': 'Export current model config', 'set.importMemory': 'Import existing memory & sessions', 'set.serviceManager': 'Service manager',
+    'set.appearance': 'Appearance', 'set.plainUi': 'Plain', 'set.fontSize': 'Chat font size', 'set.lang': 'Language', 'set.model': 'Model', 'set.addModel': 'Add model', 'set.features': 'Features', 'set.importMykey': 'Import model config (mykey.py)', 'set.exportMykey': 'Export current model config', 'set.importMemory': 'Import existing memory & sessions (select GenericAgent root)', 'set.serviceManager': 'Service manager',
     'shortcut.askConfirm': 'Create a desktop shortcut for GenericAgent?',
     'appearance.light': 'Light', 'appearance.dark': 'Dark',
     'set.noModels': 'No models yet — add one below',
@@ -638,7 +639,8 @@ const I18N = {
     'sys.memoryImported': 'Memory imported',
     'err.memoryImport': 'Failed to import memory',
     'sys.memoryImportBackup': 'Previous memory backed up to',
-    'sys.memoryImportPrompt': 'Enter the full path of the GenericAgent directory to import from:',
+    'sys.memoryPickTitle': 'Select the GenericAgent root directory (the folder containing memory and temp)',
+    'sys.memoryImportPrompt': 'Enter the full path of the GenericAgent root directory (the folder containing memory and temp, not the memory folder itself):',
     'sys.mykeyExported': 'Model config exported',
     'st.starting': 'Starting…', 'st.stopping': 'Stopping…', 'st.online': 'Online', 'st.offline': 'Offline', 'st.error': 'Error', 'st.running': 'Running', 'st.abnormal': 'Error',
     'act.configure': 'Configure', 'act.logs': 'Logs', 'act.restart': 'Restart', 'act.stop': 'Stop', 'act.start': 'Start', 'act.exit': 'Exit',
@@ -1019,7 +1021,7 @@ bindClick('export-mykey-btn', async (e) => {
 async function importMemoryFromDir() {
   let sourceDir = '';
   if (window.__TAURI__?.core?.invoke) {
-    sourceDir = await window.ga.tauriInvoke('pick_directory');
+    sourceDir = await window.ga.tauriInvoke('pick_directory', { title: t('sys.memoryPickTitle') });
   } else {
     sourceDir = window.prompt(t('sys.memoryImportPrompt')) || '';
   }

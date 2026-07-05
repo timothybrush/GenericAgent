@@ -727,10 +727,14 @@ fn export_mykey(content: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn pick_directory() -> Option<String> {
-    rfd::FileDialog::new()
-        .pick_folder()
-        .map(|p| p.to_string_lossy().into_owned())
+fn pick_directory(title: Option<String>) -> Option<String> {
+    let mut dlg = rfd::FileDialog::new();
+    if let Some(t) = title {
+        if !t.is_empty() {
+            dlg = dlg.set_title(&t);
+        }
+    }
+    dlg.pick_folder().map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
