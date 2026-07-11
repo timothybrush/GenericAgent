@@ -543,7 +543,8 @@ class GenericAgentHandler(BaseHandler):
         if skip: return "\n"
         h = self.history_info; W = 30
         earlier = f'<earlier_context>\n{self._fold_earlier(h[:-W])}\n</earlier_context>\n' if len(h) > W and self.current_turn % 4 == 1 else ""
-        history = f'<history>\n{"\n".join(h[-W:])}\n</history>' if self.current_turn % 2 == 1 else ""
+        joined_history = "\n".join(h[-W:])
+        history = f'<history>\n{joined_history}\n</history>' if self.current_turn % 2 == 1 else ""
         prompt = f"\n### [WORKING MEMORY]\n{earlier}{history}"
         prompt += f"\nCurrent turn: {self.current_turn}\n"
         if self.working.get('key_info'): prompt += f"\n<key_info>{self.working.get('key_info')}</key_info>"
@@ -565,9 +566,9 @@ class GenericAgentHandler(BaseHandler):
 
         if turn % 175 == 0 and (not _plan):
             next_prompt += f"\n\n[DANGER] Turn {turn}. Must call ask_user to summarize progress and get direction. No more blind retries."
-        elif turn % 7 == 0:
+        elif turn % 13 == 0:
             next_prompt += f"\n\n[SYSTEM] Turn {turn}. Call update_working_checkpoint to save key context. Stop ineffective retries; if no progress, switch strategy: 1) Probe physical boundaries 2) **Re-read relevant SOPs**"
-        elif turn % 25 == 0:
+        elif turn % 31 == 0:
             next_prompt += f"\n\n[SYSTEM] Turn {turn}. Write checkpoints/key findings/tried approaches to a **file** for future reference (not only working_checkpoint!). Avoid losing critical info."
         elif turn % 10 == 0: next_prompt += get_global_memory()
 
