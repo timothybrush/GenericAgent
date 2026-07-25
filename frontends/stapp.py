@@ -135,7 +135,7 @@ def render_sidebar():
     st.caption(f"LLM Core: {llm_labels.get(current_idx, str(current_idx))}")
     selected_idx = st.selectbox("LLM", [idx for idx, _, _ in llm_options], index=next((i for i, (idx, _, _) in enumerate(llm_options) if idx == current_idx), 0), format_func=llm_labels.get, label_visibility="collapsed", key="sidebar_llm_select")
     if selected_idx != current_idx:
-        agent.next_llm(selected_idx); st.rerun(scope="fragment")
+        agent.next_llm(selected_idx); st.rerun()
     if st.button(T('force_stop')):
         agent.abort(); st.toast("Stop signal sended"); st.rerun()
     if st.button(T('desktop_pet')):
