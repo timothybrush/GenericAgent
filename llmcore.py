@@ -659,7 +659,7 @@ def _fix_messages(messages):
         if m.get('role') not in ('user', 'assistant'): continue
         blocks = W(m.get('content', []))
         if merged and m['role'] == merged[-1]['role']:
-            merged[-1]['content'] += [{"type": "text", "text": "\n"}] + blocks
+            merged[-1]['content'] += list(blocks)
         else:
             merged.append({"role": m['role'], "content": list(blocks)})
     while merged and merged[0]['role'] != 'user': merged.pop(0)
@@ -685,6 +685,7 @@ def _fix_messages(messages):
                 else: rest.append(b)
             m['content'] = [got.get(u) or {"type": "tool_result", "tool_use_id": u, "content": "(error)"} for u in prev_uses] + rest
             prev_uses = []
+    for m in merged: m['content'] = [b for b in m['content'] if not (isinstance(b, dict) and b.get('type') == 'text' and not (b.get('text') or '').strip())] or [{"type": "text", "text": "."}]
     return merged
 
 class NativeClaudeSession(BaseSession):
