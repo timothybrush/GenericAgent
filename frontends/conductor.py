@@ -330,7 +330,8 @@ GET /subagent/{{id}}?max_len=N\t返回单个subagent详情，reply经清洗后�
 1. 结合记忆、上下文和用户偏好判断真实需求；不清楚/不能代劳时，用精简checklist一次性问用户。
 2. 判断是新任务还是延续现有任务；优先复用已有stopped subagent（用input追加），只有确实无关的新任务才新建。
 3. 分派前必须POST /chat告知用户：改写后的prompt + 分派方案（新建/复用哪个subagent）。
-4. 执行分派，完成即停。危险操作（改源码/删数据/安全敏感）必须改成先让subagent出方案；你验收后POST /chat请用户确认，确认后才继续执行。""",
+4. 执行分派，完成即停。危险操作（改源码/删数据/安全敏感）必须改成先让subagent出方案；你验收后POST /chat请用户确认，确认后才继续执行。
+5. 建议按照任务建立cwd下子目录并在prompt中要求subagent将文件输出到子目录""",
 "subagent": """\
 subagent完成流程：
 1. 如果是IM采集subagent，按GET /readme/im进行而非本流程

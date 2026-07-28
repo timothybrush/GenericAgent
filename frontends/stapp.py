@@ -109,15 +109,17 @@ def build_prompt(objective):
 
 @st.cache_resource
 def get_controller():
-    b = {'ev': threading.Event(), 'obj': '', 'out': None, 'ready': False}
+    b = {'ev': threading.Event(), 'obj': '', 'out': None, 'ready': False, 'ag': None, 'epoch': 0}
     def loop():
-        ag = GenericAgent(); ag.verbose = False; ag.log_path = False
+        ag = GenericAgent(); ag.verbose = False; ag.log_path = False; b['ag'] = ag
         threading.Thread(target=ag.run, daemon=True).start()
         while True:
-            b['ev'].wait(); b['ev'].clear()
+            b['ev'].wait(); b['ev'].clear(); ep = b.get('job', b['epoch'])
+            if ep != b['epoch']: continue
             if ag.llm_no != agent.llm_no: ag.next_llm(agent.llm_no)
             dq = ag.put_task(build_prompt(b['obj']), source="controller")
             while 'done' not in (it := dq.get()): pass
+            if ep != b['epoch']: continue   # Stop Loop 已翻页 → 丢弃过期决策
             ms = re.findall(r'<next_prompt>(.*?)</next_prompt>', it['done'], re.S)
             b['out'] = ms[-1].strip() if ms else None; b['ready'] = True
     threading.Thread(target=loop, daemon=True).start(); return b
@@ -137,7 +139,9 @@ def render_sidebar():
     if selected_idx != current_idx:
         agent.next_llm(selected_idx); st.rerun()
     if st.button(T('force_stop')):
-        agent.abort(); st.toast("Stop signal sended"); st.rerun()
+        agent.abort()
+        st.toast("Stop signal sent")
+        st.rerun(scope="app")
     if st.button(T('desktop_pet')):
         kwargs = {'creationflags': 0x08} if sys.platform == 'win32' else {}
         pet_script = os.path.join(script_dir, 'desktop_pet_v2.pyw')
@@ -174,14 +178,19 @@ def render_sidebar():
     if st.session_state.get('loop_enabled'):
         if st.button("⏹️ Stop Loop"):
             st.session_state.loop_enabled = False
+            b = get_controller(); b['epoch'] += 1; b['ready'] = False
+            if b['ag'] is not None: b['ag'].abort()  # controller 若在决策也断掉
+            agent.abort()   # 兼做 Force Stop：立刻断
             st.toast("⏹️ Loop stopped"); st.rerun(scope="app")
         st.caption("🔁 Looping")
     else:
         if st.button("🔁 Loop!"):
             st.session_state.loop_enabled = True
-            get_controller()
-            st.session_state['_inject_prompt'] = st.session_state.get('loop_prompt_input', '')
-            st.toast("🔁 Looping"); st.rerun(scope="app")
+            get_controller(); st.toast("🔁 Looping")
+            # 流式中不做 app rerun（会打断本轮）：留给本轮收尾回调戳 controller 续
+            if st.session_state.get('display_queue') is None:
+                st.session_state['_inject_prompt'] = st.session_state.get('loop_prompt_input', '')
+                st.rerun(scope="app")
     st.divider()
     if st.session_state.autonomous_enabled:
         if st.button(T('auto_pause')):
@@ -245,69 +254,57 @@ def render_segments(segments, suffix=''):
         else:
             st.markdown(seg['content'] + suffix)
 
-def agent_backend_stream(prompt=None):
-    """Drain main task display_queue.
-    - prompt given:  start a fresh task; new dq is kept in session_state.
-    - prompt is None: resume a dq left in session_state by a prior run (e.g. after /btw).
-    Per-chunk progress is mirrored to session_state.partial_response so the rendered
-    bubble survives reruns. No implicit agent.abort() — explicit stop is on the Stop button."""
-    if prompt is not None:
-        st.session_state.display_queue = agent.put_task(prompt, source="user")
-        st.session_state.partial_response = ''
-    dq = st.session_state.get('display_queue')
-    if dq is None: return
-    # Drop a dangling 'LLM Running (Turn N) ...' marker if the captured partial
-    # ended right at a turn boundary with no content yet — otherwise the resume
-    # bubble flashes as a marker-only gray line. The marker reappears with
-    # content on the next chunk (raw_resp is cumulative).
-    response = re.sub(r'\**LLM Running \(Turn \d+\) \.\.\.\**\s*$',
-                      '', st.session_state.get('partial_response', '')).rstrip()
-    try:
-        while True:
-            try: item = dq.get(timeout=1)
-            except queue.Empty:
-                yield response   # heartbeat: let outer st.markdown() run → Streamlit checks StopException
-                continue
-            if 'next' in item:
-                response = item['next']
-                st.session_state.partial_response = response
-                yield response
-            if 'done' in item:
-                st.session_state.display_queue = None
-                st.session_state.partial_response = ''
-                yield item['done']; break
-    finally:
-        agent.abort()
-        try:
+def _start_main_task(prompt):
+    """Start a task whose queue can be drained across Streamlit reruns."""
+    st.session_state.display_queue = agent.put_task(prompt, source="user")
+    st.session_state.partial_response = ""
+
+
+def _cancel_main_task():
+    """Explicitly cancel the backend and detach its display queue from the UI."""
+    agent.abort()
+    st.session_state.display_queue = None
+    st.session_state.partial_response = ""
+
+
+def _poll_main_task(max_items=256):
+    """Drain only currently available chunks so the Streamlit script never blocks."""
+    dq = st.session_state.get("display_queue")
+    if dq is None: return None
+    done = None
+    for _ in range(max_items):
+        try: item = dq.get_nowait()
+        except queue.Empty: break
+        if "next" in item:
+            st.session_state.partial_response = item["next"]
+        if "done" in item:
+            done = item["done"]
             st.session_state.display_queue = None
-            st.session_state.partial_response = ''
-        except BaseException:
-            pass
+            st.session_state.partial_response = ""
+            break
+    return done
 
 
-def render_main_stream(prompt=None):
-    """Render the assistant bubble for the main task (new or resumed). Saves final to messages."""
+@st.fragment(run_every=timedelta(milliseconds=200))
+def render_main_stream():
+    """Poll and redraw briefly, leaving the script thread free for sidebar events."""
+    done = _poll_main_task()
+    response = done if done is not None else st.session_state.get("partial_response", "")
+    # Avoid a marker-only gray line at a turn boundary. It reappears with content.
+    if done is None:
+        response = re.sub(r'\**LLM Running \(Turn \d+\) \.\.\.\**\s*$', '', response).rstrip()
     with st.chat_message("assistant"):
-        frozen = 0; live = st.empty(); response = ''
-        CURSOR = ' ▌'
-        for response in agent_backend_stream(prompt):
-            segs = fold_turns(response)
-            n_done = max(0, len(segs) - 1)
-            while frozen < n_done:
-                with live.container(): render_segments([segs[frozen]])
-                live = st.empty(); frozen += 1
-            with live.container(): render_segments([segs[-1]], suffix=CURSOR)   # live 区域
-        segs = fold_turns(response)
-        for i in range(frozen, len(segs)):
-            with live.container(): render_segments([segs[i]])
-            if i < len(segs) - 1: live = st.empty()
+        render_segments(fold_turns(response), suffix="" if done is not None else " ▌")
+    if done is None: return
+
     if response:
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.session_state.last_reply_time = int(time.time())
         # ── 循环回调：回答完成戳醒 controller 决策(去程,现取最新objective) ──
         if st.session_state.get('loop_enabled'):
             b = get_controller()
-            b['obj'] = st.session_state.get('loop_prompt_input', ''); b['ready'] = False; b['ev'].set()
+            b['obj'] = st.session_state.get('loop_prompt_input', ''); b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
+    st.rerun(scope="app")
 
 if not hasattr(agent, "_ui_messages"): agent._ui_messages = st.session_state.get("messages", [])
 if "messages" not in st.session_state: st.session_state.messages = agent._ui_messages
@@ -345,10 +342,8 @@ if prompt:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     cmd = (prompt or "").strip()
     def _reset_and_rerun():
+        _cancel_main_task()
         st.session_state.streaming = False
-        st.session_state.stopping = False
-        st.session_state.display_queue = None
-        st.session_state.partial_response = ""
         st.session_state.reply_ts = ""
         st.session_state.current_prompt = ""
         st.session_state.last_reply_time = int(time.time())
@@ -407,22 +402,37 @@ if prompt:
             {"role": "assistant", "content": result, "time": ts},
         ]
         _reset_and_rerun()
-    # Regular prompt: any in-flight task will be aborted by the finally block in
-    # agent_backend_stream when StopException interrupts the prior generator.
+    # Regular prompt starts a new main task. Explicitly detach any prior task first;
+    # sidebar-only reruns never pass through this branch, so they keep the queue.
+    if st.session_state.get("display_queue") is not None:
+        _cancel_main_task()
     st.session_state.messages.append({"role": "user", "content": prompt})
     if hasattr(agent, '_pet_req') and not prompt.startswith('/'): agent._pet_req('state=walk')
     with st.chat_message("user"): st.markdown(prompt)
-    render_main_stream(prompt)
+    _start_main_task(prompt)
+    render_main_stream()
 elif st.session_state.get('display_queue') is not None:
     # No new prompt but a task is mid-flight (typically a /btw rerun) — resume drain.
     render_main_stream()
+
+# Faux RUNNING badge: rendered in the main body (NOT the polling fragment) so its DOM node
+# survives fragment ticks — no animation restart/flicker. The app rerun on done wipes it.
+if st.session_state.get('display_queue') is not None:
+    st.markdown(
+        '<div class="ga-run-badge">RUNNING</div>'
+        '<style>.ga-run-badge{position:fixed;top:1.25rem;right:2.8rem;z-index:1000001;'
+        'padding:1px 10px;border-radius:12px;background:rgba(255,75,75,.10);'
+        'color:#ff4b4b;font-size:.72rem;font-weight:600;letter-spacing:.05em;'
+        'animation:gaPulse 1.2s ease-in-out infinite}'
+        '@keyframes gaPulse{50%{opacity:.35}}</style>',
+        unsafe_allow_html=True)
 
 # ── 空闲自主行动：fragment 定时检测，替代 launch.pyw 的 idle_monitor ──
 @st.fragment(run_every=timedelta(minutes=1))
 def _idle_checker():
     if st.session_state.get('loop_enabled'):
         b = get_controller()
-        if b['ready']:
+        if b['ready'] and st.session_state.get('display_queue') is None:   # 运行中不抢跑
             b['ready'] = False
             if b['out'] and '停止循环' not in b['out']: st.session_state['_inject_prompt'] = b['out']
             else: st.session_state.loop_enabled = False
