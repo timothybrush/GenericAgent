@@ -97,14 +97,16 @@ def safeprint(*argv):
     except OSError: pass
 print = safeprint
 
+STATS = {}
+
 def trim_messages_history(history, sess):
     cap = sess.context_win * 3
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
     kp = sess.trim_keep_prefix
     def cost(ms): return sum(len(json.dumps(m, ensure_ascii=False)) for m in ms)
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
-    print(f'[Debug] Current context: {cost(history)} chars, {len(history)} messages.')
-    if cost(history) <= cap: return
+    STATS.update(ctx=(c := cost(history)), msgs=len(history)); print(f'[Debug] Current context: {c} chars, {len(history)} messages.')
+    if c <= cap: return
     compress_history_tags(history, keep_recent=4, force=True)
     if cost(history) <= target: return
     pre, post = history[:kp], history[kp:]
@@ -120,7 +122,7 @@ def trim_messages_history(history, sess):
         gap = [{"role": "assistant", "content": _d()}] if m.get('role') == 'user' else [{"role": "user", "content": _d()}, {"role": "assistant", "content": _d()}]
         history[:] = pre + gap + post
     else: history[:] = pre + post
-    print(f'[Debug] Trimmed context, current: {cost(history)} chars, {len(history)} messages.')
+    STATS.update(ctx=(c := cost(history)), msgs=len(history)); print(f'[Debug] Trimmed context, current: {c} chars, {len(history)} messages.')
 
 def auto_make_url(base, path):
     b, p = base.rstrip('/'), path.strip('/')
@@ -189,7 +191,7 @@ def _parse_claude_sse(resp_lines):
             stop_reason = delta.get("stop_reason", stop_reason)
             out_usage = evt.get("usage", {})
             out_tokens = out_usage.get("output_tokens", 0)
-            if out_tokens: print(f"[Output] tokens={out_tokens} stop_reason={stop_reason}")
+            if out_tokens: STATS['out'] = out_tokens; print(f"[Output] tokens={out_tokens} stop_reason={stop_reason}")
         elif evt_type == "message_stop": got_message_stop = True
         elif evt_type == "error":
             err = evt.get("error", {})
@@ -333,7 +335,10 @@ def _record_usage(usage, api_mode):
         if out: print(f"[Output] tokens={out}")
     elif api_mode == 'messages':
         ci, cr, inp = usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0), usage.get("input_tokens", 0)
+        cached, out = cr, 0
         print(f"[Cache] input={inp} creation={ci} read={cr}")
+    else: return
+    STATS.update(inp=inp, cached=cached, out=out)
     
 def _parse_openai_json(data, api_mode="chat_completions"):
     blocks = []

@@ -13,8 +13,9 @@ sys.path.append(os.path.abspath(script_dir))
 
 import streamlit as st
 import time, json, re, threading, queue
+from functools import lru_cache
 from datetime import timedelta
-import agentmain
+import agentmain, llmcore
 from agentmain import GenericAgent
 import chatapp_common  # activate /continue command (monkey patches GeneraticAgent)
 from continue_cmd import handle_frontend_command, reset_conversation, list_sessions, extract_ui_messages
@@ -178,7 +179,7 @@ def render_sidebar():
         field-sizing: content; min-height: 1.6em !important; height: auto !important;
     }
     </style>""", unsafe_allow_html=True)
-    st.text_area("Loop prompt", value=st.session_state.get('loop_prompt_input', "继续" if LANG=='zh' else 'next'), key="loop_prompt_input", height=1)
+    st.text_area("Loop prompt", value=st.session_state.get('loop_prompt_input', "继续" if LANG=='zh' else 'next'), key="loop_prompt_input", height=68)
     if st.session_state.get('loop_enabled'):
         if st.button("⏹️ Stop Loop"):
             st.session_state.loop_enabled = False
@@ -215,7 +216,7 @@ def render_sidebar():
             _sp(); st.rerun(scope="app")
 with st.sidebar: render_sidebar()
 
-def fold_turns(text):
+def _fold_turns_impl(text):
     """Return list of segments: [{'type':'text','content':...}, {'type':'fold','title':...,'content':...}]"""
     # 先把4+反引号块替换为占位符，避免误切子agent嵌套的 LLM Running
     _ph = []
@@ -246,6 +247,13 @@ def fold_turns(text):
             segments.append({'type': 'fold', 'title': title, 'content': content})
         else: segments.append({'type': 'text', 'content': marker + content})
     return segments
+
+@st.cache_resource
+def _get_fold_turns():
+    """Keep parsed history across Streamlit reruns."""
+    return lru_cache(maxsize=128)(_fold_turns_impl)
+
+fold_turns = _get_fold_turns()
 _SUMMARY_TAG_RE = re.compile(r'<summary>.*?</summary>\s*', re.DOTALL)
 
 def render_segments(segments, suffix=''):
@@ -262,6 +270,8 @@ def _start_main_task(prompt):
     """Start a task whose queue can be drained across Streamlit reruns."""
     st.session_state.display_queue = agent.put_task(prompt, source="user")
     st.session_state.partial_response = ""
+    st.session_state.task_start_ts = time.time()
+    st.session_state.pop('task_end_ts', None)
 
 
 def _cancel_main_task():
@@ -283,32 +293,48 @@ def _poll_main_task(max_items=256):
             st.session_state.partial_response = item["next"]
         if "done" in item:
             done = item["done"]
+            st.session_state.task_end_ts = time.time()
             st.session_state.display_queue = None
             st.session_state.partial_response = ""
             break
     return done
 
 
-@st.fragment(run_every=timedelta(milliseconds=200))
-def render_main_stream():
-    """Poll and redraw briefly, leaving the script thread free for sidebar events."""
+@st.fragment(run_every=timedelta(seconds=1))
+def render_main_stream(frozen_host, live_slot, render_state):
+    """Append completed turns outside the fragment; redraw only the active turn."""
     done = _poll_main_task()
-    response = done if done is not None else st.session_state.get("partial_response", "")
-    # Avoid a marker-only gray line at a turn boundary. It reappears with content.
-    if done is None:
-        response = re.sub(r'\**LLM Running \(Turn \d+\) \.\.\.\**\s*$', '', response).rstrip()
-    with st.chat_message("assistant"):
-        render_segments(fold_turns(response), suffix="" if done is not None else " ▌")
-    if done is None: return
+    if done is not None:
+        if done:
+            st.session_state.messages.append({"role": "assistant", "content": done})
+            st.session_state.last_reply_time = int(time.time())
+            # ── 循环回调：回答完成戳醒 controller 决策(去程,现取最新objective) ──
+            if st.session_state.get('loop_enabled'):
+                b = get_controller()
+                b['obj'] = st.session_state.get('loop_prompt_input', ''); b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
+        # The final response is rendered once from history on the full-app rerun.
+        st.rerun(scope="app")
 
-    if response:
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.session_state.last_reply_time = int(time.time())
-        # ── 循环回调：回答完成戳醒 controller 决策(去程,现取最新objective) ──
-        if st.session_state.get('loop_enabled'):
-            b = get_controller()
-            b['obj'] = st.session_state.get('loop_prompt_input', ''); b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
-    st.rerun(scope="app")
+    response = st.session_state.get("partial_response", "")
+    # Avoid a marker-only gray line at a turn boundary. It reappears with content.
+    response = re.sub(r'\**LLM Running \(Turn \d+\) \.\.\.\**\s*$', '', response).rstrip()
+    segments = fold_turns(response)
+    n_done = max(0, len(segments) - 1)
+    while render_state['frozen'] < n_done:
+        with frozen_host:
+            render_segments([segments[render_state['frozen']]])
+        render_state['frozen'] += 1
+    # This external slot keeps a stable delta path; only the growing final segment changes.
+    with live_slot.container():
+        render_segments([segments[-1]], suffix=" ▌")
+
+
+def mount_main_stream():
+    """Create persistent targets captured by the fragment until the next full rerun."""
+    with st.chat_message("assistant"):
+        frozen_host = st.container()
+        live_slot = st.empty()
+        render_main_stream(frozen_host, live_slot, {'frozen': 0})
 
 if not hasattr(agent, "_ui_messages"): agent._ui_messages = st.session_state.get("messages", [])
 if "messages" not in st.session_state: st.session_state.messages = agent._ui_messages
@@ -428,22 +454,41 @@ if prompt:
     if hasattr(agent, '_pet_req') and not prompt.startswith('/'): agent._pet_req('state=walk')
     with st.chat_message("user"): st.markdown(prompt)
     _start_main_task(prompt)
-    render_main_stream()
+    mount_main_stream()
 elif st.session_state.get('display_queue') is not None:
     # No new prompt but a task is mid-flight (typically a /btw rerun) — resume drain.
-    render_main_stream()
+    mount_main_stream()
 
-# Faux RUNNING badge: rendered in the main body (NOT the polling fragment) so its DOM node
-# survives fragment ticks — no animation restart/flicker. The app rerun on done wipes it.
-if st.session_state.get('display_queue') is not None:
+# Usage/time label remains after completion; while running only its fragment updates once/sec.
+_has_task_stats = 'task_start_ts' in st.session_state
+_is_running = st.session_state.get('display_queue') is not None
+if _has_task_stats:
+    def _render_stat_badge():
+        end_ts = time.time() if _is_running else st.session_state.get('task_end_ts', time.time())
+        secs = max(0, int(end_ts - st.session_state.task_start_ts))
+        stats = dict(llmcore.STATS)
+        short = lambda n: f'{n / 1000:.0f}k' if n >= 1000 else str(n)
+        usage = (f"{short(stats['ctx'])} chars·{stats['msgs']}msgs │ "
+                 f"in {short(stats.get('inp', 0))} toks·cached{short(stats.get('cached', 0))}·out{short(stats.get('out', 0))} │ "
+                 if 'ctx' in stats else '')
+        st.markdown(f'<div class="ga-stat-badge">{usage}{secs // 60}:{secs % 60:02d}</div>',
+                    unsafe_allow_html=True)
+    if _is_running:
+        @st.fragment(run_every=timedelta(seconds=1))
+        def _live_stat_badge(): _render_stat_badge()
+        _live_stat_badge()
+    else:
+        _render_stat_badge()
+
+if _has_task_stats or _is_running:
     st.markdown(
-        '<div class="ga-run-badge">RUNNING</div>'
-        '<style>.ga-run-badge{position:fixed;top:1.25rem;right:2.8rem;z-index:1000001;'
-        'padding:1px 10px;border-radius:12px;background:rgba(255,75,75,.10);'
-        'color:#ff4b4b;font-size:.72rem;font-weight:600;letter-spacing:.05em;'
-        'animation:gaPulse 1.2s ease-in-out infinite}'
-        '@keyframes gaPulse{50%{opacity:.35}}</style>',
-        unsafe_allow_html=True)
+        ('<div class="ga-run-badge">RUNNING</div>' if _is_running else '') +
+        '<style>.ga-run-badge,.ga-stat-badge{position:fixed;top:1.25rem;z-index:1000001;'
+        'padding:1px 10px;border-radius:12px;font-size:.72rem;font-weight:600;letter-spacing:.05em}'
+        '.ga-run-badge{right:2.8rem;background:rgba(255,75,75,.10);color:#ff4b4b;animation:gaPulse 1.2s ease-in-out infinite}'
+        '.ga-stat-badge{right:8.4rem;background:rgba(128,128,128,.1);color:#8a8a8a;'
+        'font-variant-numeric:tabular-nums;letter-spacing:0}'
+        '@keyframes gaPulse{50%{opacity:.35}}</style>', unsafe_allow_html=True)
 
 # ── 空闲自主行动：fragment 定时检测，替代 launch.pyw 的 idle_monitor ──
 @st.fragment(run_every=timedelta(minutes=1))
