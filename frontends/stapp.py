@@ -52,6 +52,8 @@ I18N = {
         'get_token_toast': '已打开浏览器',
         'need_mykey': '⚠️ 请配置 mykey.py',
         'reopen_page': '等待配置写入，完成后将自动进入…',
+        'show_earlier': '📜 展开更早的 {n} 条',
+        'hide_earlier': '📕 收起更早消息',
     },
     'en': {
         'force_stop': 'Force Stop',
@@ -67,6 +69,8 @@ I18N = {
         'get_token_toast': 'Opened in browser',
         'need_mykey': '⚠️ Please set mykey.py',
         'reopen_page': 'Waiting for config… will enter automatically',
+        'show_earlier': '📜 Show {n} earlier messages',
+        'hide_earlier': '📕 Collapse earlier messages',
     },
 }
 def T(key): return I18N.get(LANG, I18N['zh']).get(key, key)
@@ -308,7 +312,21 @@ def render_main_stream():
 
 if not hasattr(agent, "_ui_messages"): agent._ui_messages = st.session_state.get("messages", [])
 if "messages" not in st.session_state: st.session_state.messages = agent._ui_messages
-for msg in st.session_state.messages:
+# Lazy history: long sessions (esp. after loop) render thousands of elements on every
+# full-app rerun → seconds of gray/RUNNING. Only render the tail unless expanded.
+_HIST_TAIL = 6
+_msgs = st.session_state.messages
+if len(_msgs) > _HIST_TAIL:
+    if not st.session_state.get("show_full_history"):
+        if st.button(T('show_earlier').format(n=len(_msgs) - _HIST_TAIL), key="_show_hist"):
+            st.session_state.show_full_history = True
+            st.rerun()
+        _msgs = _msgs[-_HIST_TAIL:]
+    else:
+        if st.button(T('hide_earlier'), key="_hide_hist"):
+            st.session_state.show_full_history = False
+            st.rerun()
+for msg in _msgs:
     with st.chat_message(msg["role"]):
         # 用 slot=st.empty() + with slot.container(): ... 的外壳，DOM 路径和流式渲染完全一致，跨 rerun 对齐
         slot = st.empty()
