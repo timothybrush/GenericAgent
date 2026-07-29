@@ -464,11 +464,13 @@ _has_task_stats = 'task_start_ts' in st.session_state
 _is_running = st.session_state.get('display_queue') is not None
 if _has_task_stats:
     def _render_stat_badge():
+        if not hasattr(llmcore, 'STATS'): return
         end_ts = time.time() if _is_running else st.session_state.get('task_end_ts', time.time())
         secs = max(0, int(end_ts - st.session_state.task_start_ts))
         stats = dict(llmcore.STATS)
         short = lambda n: f'{n / 1000:.0f}k' if n >= 1000 else str(n)
-        usage = (f"{short(stats['ctx'])} chars·{stats['msgs']}msgs │ "
+        usage = ((f"{stats['session']} │ " if stats.get('session') else '') +
+                 f"{short(stats['ctx'])} chars·{stats['msgs']}msgs │ "
                  f"in {short(stats.get('inp', 0))} toks·cached{short(stats.get('cached', 0))}·out{short(stats.get('out', 0))} │ "
                  if 'ctx' in stats else '')
         st.markdown(f'<div class="ga-stat-badge">{usage}{secs // 60}:{secs % 60:02d}</div>',

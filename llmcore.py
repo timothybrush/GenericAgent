@@ -334,9 +334,9 @@ def _record_usage(usage, api_mode):
         print(f"[Cache] input={inp} cached={cached}")
         if out: print(f"[Output] tokens={out}")
     elif api_mode == 'messages':
-        ci, cr, inp = usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0), usage.get("input_tokens", 0)
-        cached, out = cr, 0
-        print(f"[Cache] input={inp} creation={ci} read={cr}")
+        ci, cr, raw_inp = usage.get("cache_creation_input_tokens", 0), usage.get("cache_read_input_tokens", 0), usage.get("input_tokens", 0)
+        inp, cached, out = raw_inp + ci + cr, cr, 0
+        print(f"[Cache] input={raw_inp} creation={ci} read={cr}")
     else: return
     STATS.update(inp=inp, cached=cached, out=out)
     
@@ -384,6 +384,7 @@ def _stamp_oai_cache_markers(messages, model):
             messages[idx] = {**messages[idx], 'content': c}
 
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
+    STATS['session'] = sess.name
     _RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 529}
     cap = float(getattr(sess, 'max_retry_after', 60.0))
     def _delay(resp, attempt):
