@@ -174,7 +174,9 @@ def _parse_claude_sse(resp_lines):
                 if current_block and current_block.get("type") == "text": current_block["text"] += text
                 if text: yield text
             elif delta.get("type") == "thinking_delta":
-                if current_block and current_block.get("type") == "thinking": current_block["thinking"] += delta.get("thinking", "")
+                thinking = delta.get("thinking", "")
+                if current_block and current_block.get("type") == "thinking": current_block["thinking"] += thinking
+                if thinking: yield thinking
             elif delta.get("type") == "signature_delta":
                 if current_block and current_block.get("type") == "thinking":
                     current_block["signature"] = current_block.get("signature", "") + delta.get("signature", "")
@@ -396,6 +398,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
         try:
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
+                sess.active_response = r
                 if r.status_code >= 400:
                     #pathlib.Path(__file__).parent.joinpath('temp','bad_requests.json').write_text(json.dumps({"url":url,"headers":headers,"payload":payload,"t":time.time()},ensure_ascii=False),encoding='utf-8')
                     d = _delay(r, attempt) if r.status_code in _RETRYABLE and attempt < sess.max_retries else None

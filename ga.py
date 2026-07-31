@@ -312,7 +312,7 @@ class GenericAgentHandler(BaseHandler):
         cwd = os.path.normpath(os.path.abspath(raw_path))
         code_cwd = os.path.normpath(self.cwd)
         maxlen = self._get_tool_maxlen(10000, args)
-        if timeout > 600: result = '[ERROR] Timeout must be <= 600 seconds, run time-consuming code in background subprocess and monitor it!'
+        if timeout > 600: result = '[ERROR] Timeout must be <= 600 seconds; code not executed. Run time-consuming code in the background instead of waiting for it to finish in the foreground, verify it started successfully, and monitor it until completion or failure.'
         elif code_type == 'python' and _arg(args, "inline_eval", False, bool):
             ns = {'handler':self, 'parent':self.parent, 'history':json.dumps(self.parent.llmclient.backend.history)}
             old_cwd = os.getcwd()

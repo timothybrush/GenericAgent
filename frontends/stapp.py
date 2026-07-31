@@ -300,8 +300,25 @@ def _poll_main_task(max_items=256):
     return done
 
 
+def _render_stat_badge(is_running, target=None):
+    """Render task usage/time into one stable element, without clearing its container."""
+    if 'task_start_ts' not in st.session_state or not hasattr(llmcore, 'STATS'):
+        return
+    end_ts = time.time() if is_running else st.session_state.get('task_end_ts', time.time())
+    secs = max(0, int(end_ts - st.session_state.task_start_ts))
+    stats = dict(llmcore.STATS)
+    short = lambda n: f'{n / 1000:.0f}k' if n >= 1000 else str(n)
+    usage = ((f"{stats['session']} │ " if stats.get('session') else '') +
+             f"{short(stats['ctx'])} chars·{stats['msgs']}msgs │ "
+             f"in {short(stats.get('inp', 0))} toks·cached{short(stats.get('cached', 0))}·out{short(stats.get('out', 0))} │ "
+             if 'ctx' in stats else '')
+    renderer = target.markdown if target is not None else st.markdown
+    renderer(f'<div class="ga-stat-badge">{usage}{secs // 60}:{secs % 60:02d}</div>',
+             unsafe_allow_html=True)
+
+
 @st.fragment(run_every=timedelta(seconds=1))
-def render_main_stream(frozen_host, live_slot, render_state):
+def render_main_stream(frozen_host, live_slot, stats_slot, render_state):
     """Append completed turns outside the fragment; redraw only the active turn."""
     done = _poll_main_task()
     if done is not None:
@@ -312,7 +329,7 @@ def render_main_stream(frozen_host, live_slot, render_state):
             if st.session_state.get('loop_enabled'):
                 b = get_controller()
                 b['obj'] = st.session_state.get('loop_prompt_input', ''); b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
-        # The final response is rendered once from history on the full-app rerun.
+        # The final response and frozen stats are rendered on the full-app rerun.
         st.rerun(scope="app")
 
     response = st.session_state.get("partial_response", "")
@@ -324,17 +341,18 @@ def render_main_stream(frozen_host, live_slot, render_state):
         with frozen_host:
             render_segments([segments[render_state['frozen']]])
         render_state['frozen'] += 1
-    # This external slot keeps a stable delta path; only the growing final segment changes.
+    # These external slots keep stable delta paths; only their contents change.
     with live_slot.container():
         render_segments([segments[-1]], suffix=" ▌")
+    _render_stat_badge(is_running=True, target=stats_slot)
 
 
-def mount_main_stream():
+def mount_main_stream(stats_slot):
     """Create persistent targets captured by the fragment until the next full rerun."""
     with st.chat_message("assistant"):
         frozen_host = st.container()
         live_slot = st.empty()
-        render_main_stream(frozen_host, live_slot, {'frozen': 0})
+        render_main_stream(frozen_host, live_slot, stats_slot, {'frozen': 0})
 
 if not hasattr(agent, "_ui_messages"): agent._ui_messages = st.session_state.get("messages", [])
 if "messages" not in st.session_state: st.session_state.messages = agent._ui_messages
@@ -379,6 +397,10 @@ _js_ime_fix = ("" if os.name == 'nt' else
     "(e.stopImmediatePropagation(),e.preventDefault())},!0))})}"
     "f();new MutationObserver(f).observe(d.body,{childList:1,subtree:1})}()")
 _embed_html(f'<script>{_js_ime_fix}</script>', height=0)
+
+# Fixed target shared by full-app rendering and the one-second stream fragment.
+# The badge is position:fixed, so this placeholder does not affect its visual position.
+stats_slot = st.empty()
 
 _injected = st.session_state.pop('_inject_prompt', None)
 prompt = st.chat_input("any task?") or _injected
@@ -454,33 +476,16 @@ if prompt:
     if hasattr(agent, '_pet_req') and not prompt.startswith('/'): agent._pet_req('state=walk')
     with st.chat_message("user"): st.markdown(prompt)
     _start_main_task(prompt)
-    mount_main_stream()
+    mount_main_stream(stats_slot)
 elif st.session_state.get('display_queue') is not None:
     # No new prompt but a task is mid-flight (typically a /btw rerun) — resume drain.
-    mount_main_stream()
+    mount_main_stream(stats_slot)
 
-# Usage/time label remains after completion; while running only its fragment updates once/sec.
+# Usage/time label remains after completion. During a task render_main_stream refreshes it.
 _has_task_stats = 'task_start_ts' in st.session_state
 _is_running = st.session_state.get('display_queue') is not None
-if _has_task_stats:
-    def _render_stat_badge():
-        if not hasattr(llmcore, 'STATS'): return
-        end_ts = time.time() if _is_running else st.session_state.get('task_end_ts', time.time())
-        secs = max(0, int(end_ts - st.session_state.task_start_ts))
-        stats = dict(llmcore.STATS)
-        short = lambda n: f'{n / 1000:.0f}k' if n >= 1000 else str(n)
-        usage = ((f"{stats['session']} │ " if stats.get('session') else '') +
-                 f"{short(stats['ctx'])} chars·{stats['msgs']}msgs │ "
-                 f"in {short(stats.get('inp', 0))} toks·cached{short(stats.get('cached', 0))}·out{short(stats.get('out', 0))} │ "
-                 if 'ctx' in stats else '')
-        st.markdown(f'<div class="ga-stat-badge">{usage}{secs // 60}:{secs % 60:02d}</div>',
-                    unsafe_allow_html=True)
-    if _is_running:
-        @st.fragment(run_every=timedelta(seconds=1))
-        def _live_stat_badge(): _render_stat_badge()
-        _live_stat_badge()
-    else:
-        _render_stat_badge()
+if _has_task_stats and not _is_running:
+    _render_stat_badge(is_running=False, target=stats_slot)
 
 if _has_task_stats or _is_running:
     st.markdown(
