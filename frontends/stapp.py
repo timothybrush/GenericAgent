@@ -360,8 +360,9 @@ def mount_main_stream():
 if not hasattr(agent, "_ui_messages"): agent._ui_messages = st.session_state.get("messages", [])
 if "messages" not in st.session_state: st.session_state.messages = agent._ui_messages
 if not hasattr(agent, "_hub"):
-    import hub
-    agent._hub = hub.connect(agent, 'stapp')   # busy-rejects; accepted tasks land in agent._hub_inbox
+    try:
+        import hub; agent._hub = hub.connect(agent, 'stapp')
+    except Exception: agent._hub = None
 # Lazy history: long sessions (esp. after loop) render thousands of elements on every
 # full-app rerun → seconds of gray/RUNNING. Only render the tail unless expanded.
 _HIST_TAIL = 10

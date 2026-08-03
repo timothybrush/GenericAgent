@@ -64,6 +64,19 @@ class HubClient:
         elif op == 'abort': data = (await asyncio.to_thread(self.abort) or {'ok': 1}) if self.abort else {'error': 'no abort hook', 'code': 'nosupport'}
         await ws.send(json.dumps({'op': 'r', 'id': c.get('id'), 'name': self.name, 'data': data}, default=str))
 
+def serve():
+    """Bring the hub up on demand: any host may spawn it, the port is the lock (a loser just exits).
+    Detached + windowless, so it outlives its spawner and no console ever flashes."""
+    import socket, subprocess
+    if '127.0.0.1' not in URL and 'localhost' not in URL: return    # a remote hub is not ours to start
+    with socket.socket() as s:
+        if s.connect_ex(('127.0.0.1', PORT)) == 0: return           # already listening
+    exe = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+    subprocess.Popen([exe if os.path.exists(exe) else sys.executable, os.path.abspath(__file__)],
+                     cwd=os.path.dirname(os.path.abspath(__file__)), close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=0x08000008 if os.name == 'nt' else 0)   # DETACHED | NO_WINDOW
+
 def connect(agent, name=None, put_task=None, get_outputs=None, abort=None, fold=None):
     """One line to wire a GA host: `hub.connect(agent, 'stapp')`; any hook can still be overridden.
     Default put refuses while the agent is busy (a remote must not cut in line), else it parks
@@ -73,6 +86,8 @@ def connect(agent, name=None, put_task=None, get_outputs=None, abort=None, fold=
         if getattr(agent, 'is_running', False): return {'error': f'peer {name} is busy', 'code': 'busy'}
         agent._hub_inbox.append({'text': text, 'q': agent.put_task(text, source='hub')})
     try:
+        try: serve()                                   # best effort: bring up a local hub if none is listening
+        except Exception: pass
         if not hasattr(agent, '_hub_inbox'): agent._hub_inbox = []
         return HubClient(name or getattr(agent, 'name', 'agent'), put_task or _put,
                          get_outputs or (lambda: agent.all_outputs), abort or agent.abort).start()
