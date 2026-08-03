@@ -1,6 +1,4 @@
 import os, sys, subprocess
-from urllib.request import urlopen
-from urllib.parse import quote
 if sys.stdout is None: sys.stdout = open(os.devnull, "w")
 if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 try: sys.stdout.reconfigure(errors='replace')
@@ -13,6 +11,7 @@ sys.path.append(os.path.abspath(script_dir))
 
 import streamlit as st
 import time, json, re, threading, queue
+
 from functools import lru_cache
 from datetime import timedelta
 import agentmain, llmcore
@@ -158,19 +157,15 @@ def render_sidebar():
             st.error("desktop_pet_v2.pyw not found")
             return
         subprocess.Popen([sys.executable, pet_script], **kwargs)
-        def _pet_req(q):
-            def _do():
-                try: urlopen(f'http://127.0.0.1:41983/?{q}', timeout=2)
-                except Exception: pass
-            threading.Thread(target=_do, daemon=True).start()
-        agent._pet_req = _pet_req
         if not hasattr(agent, '_turn_end_hooks'): agent._turn_end_hooks = {}
-        def _pet_hook(ctx):
-            parts = [f"Turn {ctx.get('turn','?')}"]
-            if ctx.get('summary'): parts.append(ctx['summary'])
-            if ctx.get('exit_reason'): parts.append('DONE')
-            _pet_req(f'msg={quote(chr(10).join(parts))}')
-            if ctx.get('exit_reason'): _pet_req('state=idle')
+        def _pet_hook(ctx):     # the pet subscribes to the bus topic 'turn': no port, no HTTP, one hop
+            done = ctx.get('exit_reason')
+            # NOTE: must be a statement, not a bare expression -- streamlit's AST "magic"
+            # rewrites bare expressions into st.write(), which fires "missing ScriptRunContext"
+            # from this worker thread (and would try to render the return value).
+            if agent._hub:
+                agent._hub.emit('turn', {'state': 'idle' if done else None, 'msg': '\n'.join(
+                    [f"Turn {ctx.get('turn', '?')}"] + [x for x in (ctx.get('summary'), done and 'DONE') if x])})
         agent._turn_end_hooks['pet'] = _pet_hook
         st.toast("Desktop pet started")
     
@@ -258,8 +253,6 @@ def _get_fold_turns():
     return lru_cache(maxsize=128)(_fold_turns_impl)
 
 fold_turns = _get_fold_turns()
-_SUMMARY_TAG_RE = re.compile(r'<summary>.*?</summary>\s*', re.DOTALL)
-
 def render_segments(segments, suffix=''):
     # 整块重画：调用方用 slot.container() 包裹，保证 DOM 路径稳定、跨 rerun 对齐（消除"灰色重影"）。
     # heartbeat 空转时 segments 不变 → Streamlit 后端 diff 无变化 → 前端零闪烁；
@@ -476,7 +469,7 @@ if prompt:
     if agent.is_running or st.session_state.get("display_queue") is not None:
         _cancel_main_task()
     st.session_state.messages.append({"role": "user", "content": prompt})
-    if hasattr(agent, '_pet_req') and not prompt.startswith('/'): agent._pet_req('state=walk')
+    if agent._hub and not prompt.startswith('/'): agent._hub.emit('turn', {'state': 'walk'})
     with st.chat_message("user"): st.markdown(prompt)
     _start_main_task(prompt)
     mount_main_stream()
