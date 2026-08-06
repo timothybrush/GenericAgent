@@ -117,6 +117,8 @@ if __name__ == '__main__':
     @app.middleware('http')
     async def guard(req: Request, call_next):
         if req.scope['server'][1] == PORT: return Response(status_code=404)   # bus port speaks WebSocket only
+        public = getattr(app.state, 'p2p_pair_open', False) and req.url.path in ('/pair', '/pair/status')
+        if public: return await call_next(req)
         t = req.query_params.get('t') or req.cookies.get('ga_hub_t') or ''    # web port: token or nothing
         if not hmac.compare_digest(t, TOKEN): return Response(status_code=403)
         r = await call_next(req); r.set_cookie('ga_hub_t', TOKEN, httponly=True, samesite='lax'); return r
@@ -184,6 +186,13 @@ if __name__ == '__main__':
     async def api_put(name: str, body: dict): return out(await ask(name, {'op': 'put_task', 'text': body.get('text', '')}))
     @app.post('/api/{name}/abort')
     async def api_abort(name: str): return out(await ask(name, {'op': 'abort'}))
+    # ---- optional P2P pairing; delete this block to remove it completely ----
+    try:
+        from hub_p2p import install as _install_p2p
+        _install_p2p(app, web_port=WEB_PORT, token=TOKEN, here=HERE)
+    except Exception:
+        pass  # missing plug-in/client/dependency must not affect the hub
+
     @app.get('/')
     async def index(): return FileResponse(os.path.join(HERE, 'hub.html'))
     @app.get('/vendor/{f}')
