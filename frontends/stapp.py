@@ -345,8 +345,13 @@ _js_ime_fix = ("" if os.name == 'nt' else
     "f();new MutationObserver(f).observe(d.body,{childList:1,subtree:1})}()")
 _embed_html(f'<script>{_js_ime_fix}</script>', height=0)
 
-_injected = st.session_state.pop('_inject_prompt', None)
-prompt = st.chat_input("any task?") or _injected
+_typed = st.chat_input("any task?")
+_injected = None if _typed else st.session_state.pop('_inject_prompt', None)  # typed run: keep parked
+if (_injected is None and not _typed and not agent.is_running
+        and st.session_state.get('display_queue') is None and getattr(agent, '_hub_inbox', None)):
+    try: _injected = agent._hub_inbox.pop(0)   # hub text enters the SAME entrance as typing
+    except IndexError: pass                    # another tab won the pop
+prompt = _typed or _injected
 if prompt:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     cmd = (prompt or "").strip()
@@ -430,15 +435,6 @@ if prompt:
     if agent._hub and not prompt.startswith('/'): agent._hub.emit('turn', {'state': 'walk'})
     with st.chat_message("user"): st.markdown(prompt)
     _start_main_task(prompt)
-elif getattr(agent, '_hub_inbox', None) and st.session_state.get('display_queue') is None:
-    # Hub task: first tab to rerun claims it (user bubble + own stream); others stay detached.
-    _hm = agent._hub_inbox.pop(0)
-    st.session_state.messages.append({"role": "user", "content": _hm['text']})
-    with st.chat_message("user"): st.markdown(_hm['text'])
-    st.session_state.display_queue = _hm['q']
-    st.session_state.task_start_ts = time.time()
-    st.session_state.pop('task_end_ts', None)
-    st.session_state.pop('_stream_frozen', None)
 
 # Stream hosts only when this session owns the queue.
 # Single always-on 1s tick below (stream / detached / hub / idle) — never unregistered.
@@ -468,7 +464,14 @@ def _tick():
                     b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
             st.session_state.pop('_stream_frozen', None)
             st.rerun(scope="app"); return
-        steps = list(((agent.all_outputs or [{}])[-1].get("outputs")) or [])
+        # Only paint all_outputs[-1] when worker is on *this* display_queue.
+        # After force-stop + immediate next prompt, UI already owns a new queue while
+        # agent still finishes / hasn't dequeued the new task → [-1] is the old task.
+        # Reading it would dump old expanders into the new bubble and inflate
+        # _stream_frozen so new steps never fold. Gate on queue identity (no hub change).
+        _dq = st.session_state.get("display_queue")
+        steps = (list(((agent.all_outputs or [{}])[-1].get("outputs")) or [])
+                 if _dq is getattr(agent, "_current_queue", None) else [])
         frozen = st.session_state.get('_stream_frozen', 0)
         while frozen < max(0, len(steps) - 1):
             body = steps[frozen] or ''
@@ -498,8 +501,8 @@ def _tick():
     if st.session_state.pop('_saw_detached', None):
         st.rerun(scope="app"); return
 
-    # 3) Hub inbox claim (full run pops it at top-level; this just wakes us)
-    if getattr(agent, '_hub_inbox', None) and st.session_state.get('display_queue') is None:
+    # 3) Hub inbox: just wake a full run; the unified entrance pops it when idle (mimics typing)
+    if getattr(agent, '_hub_inbox', None) and st.session_state.get('display_queue') is None and not agent.is_running:
         st.rerun(scope="app"); return
 
     # 4) Loop / autonomous idle inject (was 1min fragment; time-gated so 1s tick is fine)

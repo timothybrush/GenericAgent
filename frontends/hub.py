@@ -1,6 +1,6 @@
 """GA Hub: `import hub` -> client (silent if no server); `python hub.py` -> WS server.
     hub.connect(agent, 'stapp')     # or override any hook: connect(a, n, put_task=, get_outputs=, abort=)
-    default put -> 'busy' if agent.is_running, else parks {'text','q'} in agent._hub_inbox for the UI
+    default put -> 'busy' if agent.is_running, else parks plain text in agent._hub_inbox for the UI
 HTTP (errors = {'error','code'} + status: offline/gone 404, busy 409, timeout 504, nosupport 501, badop 400):
     GET peers -> [{name,title,n_msgs,sig}] | {name}/messages?detail=1&sig= -> {title,tasks:[{i,input,steps:
     [{j,title,n}]}],sig} or {same:1,sig} | {name}/seg/{i}/{j}?off=N -> {content,off,n} (step bodies, tailable)
@@ -57,10 +57,12 @@ class HubClient:
         w = sum(2 if ord(ch) > 0x2E80 else 1 for ch in title)   # display width: a CJK char is worth two
         if len(ins) > 1 and w < TITLE_MIN: title = ins[-2].split('\n')[0] + ' <- ' + title
         det, rows = int(c.get('detail', 1)), []
+        since = max(0, int(c.get('since') or 0))   # delta: the client already holds rows < since (they are immutable)
         for i, (t, o) in enumerate(zip(tasks, outs)):
+            if i < since: continue
             steps = [{'j': j, 'title': self._stitle(i, j, s), 'n': len(s or '')} for j, s in enumerate(o)]
             rows.append({'i': i, 'input': t.get('input', ''), **({'steps': steps} if det else {'ns': len(o)})})
-        return {'title': title[:80], 'tasks': rows, 'sig': sig, **self.state()}
+        return {'title': title[:80], 'tasks': rows, 'nt': len(tasks), 'sig': sig, **self.state()}   # nt lets a delta client spot /clear
     def _seg(self, c):
         tasks, off = list(self.get_outputs() or []), max(0, int(c.get('off') or 0))
         i, j = int(c.get('i', -1)), int(c.get('j', -1))
@@ -92,11 +94,12 @@ def serve():
 def connect(agent, name=None, put_task=None, get_outputs=None, abort=None, fold=None):
     """One line to wire a GA host: `hub.connect(agent, 'stapp')`; any hook can still be overridden.
     Default put refuses while the agent is busy (a remote must not cut in line), else it parks
-    (text, queue) in agent._hub_inbox so a UI can pop it and echo the task as its own bubble.
+    plain text in agent._hub_inbox; the UI feeds it through its own input entrance when idle,
+    so remote tasks behave exactly like typed ones (bubble/stream/stop). Requires a live UI tab.
     Never raises: a broken hub must not break its host."""
     def _put(text):
         if getattr(agent, 'is_running', False): return {'error': f'peer {name} is busy', 'code': 'busy'}
-        agent._hub_inbox.append({'text': text, 'q': agent.put_task(text, source='hub')})
+        agent._hub_inbox.append(text)   # no put_task here: the UI's unified entrance sends it
     try:
         try: serve()                                   # best effort: bring up a local hub if none is listening
         except Exception: pass
@@ -179,7 +182,7 @@ if __name__ == '__main__':
         for n in [x for x in pcache if x not in peers]: pcache.pop(n, None)
         return rows
     @app.get('/api/{name}/messages')
-    async def api_messages(name: str, detail: int = 1, sig: str = None): return out(await ask(name, {'op': 'get', 'detail': detail, 'sig': sig}))
+    async def api_messages(name: str, detail: int = 1, sig: str = None, since: int = 0): return out(await ask(name, {'op': 'get', 'detail': detail, 'sig': sig, 'since': since}))
     @app.get('/api/{name}/seg/{i}/{j}')
     async def api_seg(name: str, i: int, j: int, off: int = 0): return out(await ask(name, {'op': 'seg', 'i': i, 'j': j, 'off': off}))
     @app.post('/api/{name}/put')
