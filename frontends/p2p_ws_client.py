@@ -269,6 +269,11 @@ class P2PSocket:
         self._relay_ready = asyncio.Event()
         self._direct_open = asyncio.Event()
         self._peer_watch = None
+        self._direct_task = None
+        self._upgrade_prepare = asyncio.Event()
+        self._upgrade_ack = asyncio.Event()
+        self._upgrade_commit = asyncio.Event()
+        self._direct_pending = []
 
     @classmethod
     async def connect(
@@ -303,22 +308,42 @@ class P2PSocket:
         self._key = session_key(private, base64.b64decode(key_msg["key"]))
         self.signal.on_data = self._on_relay_data
         self._relay_ready.set()
+        self.mode = "relay"
         # 对端离开房间后本连接已无意义；若不关闭，本端会一直占着房间等待，
         # 新 peer 加入时无人重做 key 握手，对方只能 15s 超时退出（死循环）。
-        # 关闭后由上层（如 hub_p2p 的 reconnect 循环）重建连接完成全新握手。
         self._peer_watch = asyncio.create_task(self._on_peer_left())
-
-        try:
-            await asyncio.wait_for(
-                self._make_direct(bool(peer["initiator"])), self.direct_timeout
-            )
-            await asyncio.wait_for(self._direct_open.wait(), self.direct_timeout)
-            self.mode = "direct"
-        except Exception as exc:
-            log.info("direct connection unavailable, using encrypted relay: %r", exc)
-            await self._drop_direct()
-            self.mode = "relay"
+        if RTCPeerConnection is not None and self.direct_timeout > 0:
+            self._direct_task = asyncio.create_task(
+                self._upgrade_direct(bool(peer["initiator"])))
         return self
+
+    async def _upgrade_direct(self, initiator):
+        """Relay 已可用时后台打洞，以三步屏障保序切到 DataChannel。"""
+        try:
+            await asyncio.wait_for(self._make_direct(initiator), self.direct_timeout)
+            await asyncio.wait_for(self._direct_open.wait(), self.direct_timeout)
+            if initiator:
+                async with self._send_lock:
+                    await self._send_control(b"prepare")
+                    await asyncio.wait_for(self._upgrade_ack.wait(), self.direct_timeout)
+                    await self._send_control(b"commit")
+                    self._commit_direct()
+            else:
+                await asyncio.wait_for(self._upgrade_prepare.wait(), self.direct_timeout)
+                async with self._send_lock:
+                    await self._send_control(b"ack")
+                    await asyncio.wait_for(self._upgrade_commit.wait(), self.direct_timeout)
+                    self._commit_direct()
+            log.info("encrypted relay upgraded to direct DataChannel")
+        except Exception as exc:
+            log.info("background direct upgrade unavailable, keeping relay: %r", exc)
+            await self._drop_direct()
+
+    def _commit_direct(self):
+        self.mode = "direct"
+        for item in self._direct_pending:
+            self._inbox.put_nowait(item)
+        self._direct_pending.clear()
 
     async def _on_peer_left(self):
         """收到 peer_left 即关闭本连接，让上层重连走完整新握手。"""
@@ -363,6 +388,8 @@ class P2PSocket:
         self.closed = True
         if self._peer_watch is not None and self._peer_watch is not asyncio.current_task():
             self._peer_watch.cancel()
+        if self._direct_task is not None and self._direct_task is not asyncio.current_task():
+            self._direct_task.cancel()
         await self._drop_direct()
         await self.signal.close()
         self._inbox.put_nowait(_Closed("socket is closed"))
@@ -462,7 +489,7 @@ class P2PSocket:
                 self.mode = "relay"
 
     def _recv_direct(self, data):
-        """重组直连分片；未封装的旧版消息按原样交付。"""
+        """重组直连分片；未封装的小消息按原样交付。"""
         if not isinstance(data, bytes) or not data.startswith(_DIRECT_MAGIC):
             self._inbox.put_nowait(data)
             return
@@ -481,9 +508,11 @@ class P2PSocket:
             raw = b"".join(entry["chunks"][i] for i in range(entry["total"]))
             if entry["flags"] & _FLAG_ZIP:
                 raw = zlib.decompress(raw)
-            self._inbox.put_nowait(
-                raw.decode() if entry["flags"] & _FLAG_TEXT else raw
-            )
+            item = raw.decode() if entry["flags"] & _FLAG_TEXT else raw
+            if self.mode == "direct":
+                self._inbox.put_nowait(item)
+            else:
+                self._direct_pending.append(item)
         except Exception as exc:
             log.warning("discarded invalid direct frame: %r", exc)
 
@@ -496,14 +525,17 @@ class P2PSocket:
 
     # ---------- 加密中继 ----------
 
-    async def _send_relay(self, data):
+    async def _send_control(self, command):
+        await self._send_relay(command, control=True)
+
+    async def _send_relay(self, data, control=False):
         await self._relay_ready.wait()
         raw = data.encode() if isinstance(data, str) else data
-        text = isinstance(data, str)
+        kind = 2 if control else int(isinstance(data, str))
         total = max(1, math.ceil(len(raw) / _CHUNK))
         msg_id = os.urandom(8).hex()
         for n in range(total):
-            chunk = bytes([text]) + raw[n * _CHUNK : (n + 1) * _CHUNK]
+            chunk = bytes([kind]) + raw[n * _CHUNK : (n + 1) * _CHUNK]
             cipher = seal(self._key, chunk)
             await self.signal.send(
                 {
@@ -522,13 +554,21 @@ class P2PSocket:
                 raise ValueError("invalid encrypted chunk")
             ident = msg["id"]
             entry = self._parts.setdefault(
-                ident, {"text": bool(chunk[0]), "total": int(msg["total"]), "chunks": {}}
+                ident, {"kind": chunk[0], "total": int(msg["total"]), "chunks": {}}
             )
             entry["chunks"][int(msg["n"])] = chunk[1:]
             if len(entry["chunks"]) == entry["total"]:
                 raw = b"".join(entry["chunks"][i] for i in range(entry["total"]))
                 del self._parts[ident]
-                self._inbox.put_nowait(raw.decode() if entry["text"] else raw)
+                if entry["kind"] == 2:
+                    if raw == b"prepare":
+                        self._upgrade_prepare.set()
+                    elif raw == b"ack":
+                        self._upgrade_ack.set()
+                    elif raw == b"commit":
+                        self._upgrade_commit.set()
+                else:
+                    self._inbox.put_nowait(raw.decode() if entry["kind"] else raw)
         except Exception as exc:
             # 篡改、错误密钥或畸形分片不会进入应用层。
             log.warning("discarded invalid relay frame: %r", exc)
