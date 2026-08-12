@@ -170,36 +170,20 @@ class Signal:
         await self._ws.send(json.dumps(obj))
 
     async def _loop(self):
-        while not self._closing:
-            try:
-                async for raw in self._ws:
-                    msg = json.loads(raw)
-                    if msg.get("type") == "data" and self.on_data:
-                        self.on_data(msg)
-                    else:
-                        self.queue(msg.get("type", "")).put_nowait(msg)
-            except Exception as exc:  # 断线：交给下面的重连
-                log.debug("signal read stopped: %r", exc)
-            if self._closing:
-                return
+        try:
+            async for raw in self._ws:
+                msg = json.loads(raw)
+                if msg.get("type") == "data" and self.on_data:
+                    self.on_data(msg)
+                else:
+                    self.queue(msg.get("type", "")).put_nowait(msg)
+        except Exception as exc:
+            log.debug("signal read stopped: %r", exc)
+        if not self._closing:
+            # 房间配对、ECDH 密钥与 relay 序号都属于本次 socket 会话；
+            # 信令原地重连会留下僵尸 P2PSocket，必须由上层完整重握手。
             self._ready.clear()
-            if not await self._reconnect():
-                self.queue("closed").put_nowait({"type": "closed"})
-                return
-
-    async def _reconnect(self) -> bool:
-        delay = 0.5
-        for i in range(self.retries):
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 8)  # 指数退避，上限 8s
-            try:
-                self._ws = await websockets.connect(self._signed_url(), max_size=1 << 21)
-                self._ready.set()
-                log.info("signal reconnected (attempt %d)", i + 1)
-                return True
-            except Exception as exc:
-                log.debug("reconnect %d failed: %r", i + 1, exc)
-        return False
+            self.queue("closed").put_nowait({"type": "closed"})
 
 # ---- merged from socket.py ----
 log = logging.getLogger("p2p_ws")
@@ -346,13 +330,18 @@ class P2PSocket:
         self._direct_pending.clear()
 
     async def _on_peer_left(self):
-        """收到 peer_left 即关闭本连接，让上层重连走完整新握手。"""
+        """对端离开或本端信令断开时，关闭连接让上层完整重握手。"""
+        waits = [asyncio.create_task(self.signal.queue(kind).get())
+                 for kind in ("peer_left", "closed")]
         try:
-            await self.signal.queue("peer_left").get()
+            await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
         except asyncio.CancelledError:
             return
+        finally:
+            for task in waits:
+                task.cancel()
         if not self.closed:
-            log.info("peer left the room; closing socket for a fresh handshake")
+            log.info("P2P peer/signaling left; closing socket for a fresh handshake")
             await self.close()
 
     # ---------- WebSocket 风格接口 ----------
