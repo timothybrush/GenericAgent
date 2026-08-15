@@ -781,7 +781,7 @@ class NativeClaudeSession(BaseSession):
         #if self.fake_cc_system_prompt: payload["max_tokens"] = 64000
         if self.temperature != 1: payload["temperature"] = self.temperature
         self._apply_claude_thinking(payload)
-        payload["context_management"] = {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]}; 
+        #payload["context_management"] = {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]}; 
         if self.fake_cc_system_prompt:
             if 'thinking' not in payload: payload["thinking"] = {"type": "adaptive"}
             if 'output_config' not in payload: payload["output_config"] = {"effort": "medium"}
