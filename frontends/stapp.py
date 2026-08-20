@@ -262,12 +262,10 @@ def _start_main_task(prompt):
     st.session_state.display_queue = agent.put_task(prompt, source="user")
     st.session_state.task_start_ts = time.time()
     st.session_state.pop('task_end_ts', None)
-    st.session_state.pop('_stream_frozen', None)
 
 def _cancel_main_task():
     agent.abort()
     st.session_state.display_queue = None
-    st.session_state.pop('_stream_frozen', None)
 
 def _poll_main_task(max_items=256):
     """Doorbell only — drain queue; render reads agent.all_outputs."""
@@ -438,13 +436,10 @@ if prompt:
 
 # Stream hosts only when this session owns the queue.
 # Poll quickly while active; reduce idle renderer churn.
-_stream_fh = _stream_ls = None
+_stream_fh = None
 if st.session_state.get('display_queue') is not None:
     with st.chat_message("assistant"):
         _stream_fh = st.container()
-        _stream_ls = st.empty()
-    # New hosts every full-app run → repaint completed steps from 0.
-    st.session_state._stream_frozen = 0
 elif agent.is_running:
     st.chat_message("assistant").markdown(T("detached_running"))
 
@@ -462,26 +457,29 @@ def _tick():
                     b = get_controller()
                     b['obj'] = st.session_state.get('loop_prompt_input', '')
                     b['ready'] = False; b['job'] = b['epoch']; b['ev'].set()
-            st.session_state.pop('_stream_frozen', None)
             st.rerun(scope="app"); return
         # Only paint all_outputs[-1] when worker is on *this* display_queue.
         # After force-stop + immediate next prompt, UI already owns a new queue while
         # agent still finishes / hasn't dequeued the new task → [-1] is the old task.
-        # Reading it would dump old expanders into the new bubble and inflate
-        # _stream_frozen so new steps never fold. Gate on queue identity (no hub change).
+        # Reading it would dump the old task's expanders into the new bubble.
+        # Gate on queue identity (no hub change).
         _dq = st.session_state.get("display_queue")
         steps = (list(((agent.all_outputs or [{}])[-1].get("outputs")) or [])
                  if _dq is getattr(agent, "_current_queue", None) else [])
-        frozen = st.session_state.get('_stream_frozen', 0)
-        while frozen < max(0, len(steps) - 1):
-            body = steps[frozen] or ''
-            with _stream_fh:
-                with st.expander(_step_title(body, frozen), expanded=False): st.markdown(body)
-            frozen += 1
-        st.session_state._stream_frozen = frozen
+        # Streamlit ≥1.62: a fragment's outside-container wrapper resets to
+        # index 0 on every fragment rerun and children not re-emitted are GC'd
+        # (see runtime/fragment.py:_reset_outside_wrappers). Incremental appends
+        # don't survive across ticks, so repaint *everything* every tick — frozen
+        # expanders plus the live tail — into the single host container. Always
+        # writing (even when steps is empty) also claims the slot on the initial
+        # run, avoiding "could not reserve a stable position".
         live = re.sub(r'\**LLM Running \(Turn \d+\) \.\.\.\**\s*$', '',
                       (steps[-1] if steps else '') or '').rstrip()
-        with _stream_ls.container(): st.markdown(live + " ▌")
+        with _stream_fh:
+            for i in range(max(0, len(steps) - 1)):
+                body = steps[i] or ''
+                with st.expander(_step_title(body, i), expanded=False): st.markdown(body)
+            st.markdown(live + " ▌")
         _render_stat_badge(is_running=True)
         return
 
