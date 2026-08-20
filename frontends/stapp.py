@@ -437,7 +437,7 @@ if prompt:
     _start_main_task(prompt)
 
 # Stream hosts only when this session owns the queue.
-# Single always-on 1s tick below (stream / detached / hub / idle) — never unregistered.
+# Poll quickly while active; reduce idle renderer churn.
 _stream_fh = _stream_ls = None
 if st.session_state.get('display_queue') is not None:
     with st.chat_message("assistant"):
@@ -448,9 +448,9 @@ if st.session_state.get('display_queue') is not None:
 elif agent.is_running:
     st.chat_message("assistant").markdown(T("detached_running"))
 
-@st.fragment(run_every=timedelta(seconds=1))
+@st.fragment(run_every=timedelta(seconds=1 if (_stream_fh is not None or agent.is_running or st.session_state.get('loop_enabled')) else 5))
 def _tick():
-    """One heartbeat: if-dispatch stream / detached / hub / idle. Always registered."""
+    """Poll every second while active and every five seconds while idle."""
     # 1) Own stream: drain done, paint all_outputs
     if _stream_fh is not None:
         done = _poll_main_task()
