@@ -778,6 +778,7 @@ jobs:
       - name: Validate six assets and publish prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
           TARGET_SHA: ${{ github.sha }}
         shell: bash

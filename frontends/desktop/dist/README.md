@@ -9,7 +9,7 @@ The public React source of truth and the place for renderer issues, pull request
 
 - <https://github.com/abraxas914/GenericAgent>
 - Exact source used for this distribution:
-  [`21f12f6dfe57ada8572bb21fe6604caac230b1cf`](https://github.com/abraxas914/GenericAgent/commit/21f12f6dfe57ada8572bb21fe6604caac230b1cf)
+  [`9fe5d69b85cfad8778ace84b6f69bc75f9e0d392`](https://github.com/abraxas914/GenericAgent/commit/9fe5d69b85cfad8778ace84b6f69bc75f9e0d392)
 
 Over the two-month React Desktop 2.0 development cycle, [abraxas914](https://github.com/abraxas914) led the new
 renderer architecture and UI, Desktop bridge and Tauri integration, startup and recovery surfaces, package
