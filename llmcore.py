@@ -473,6 +473,13 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     except: body = ""
                     err = f"!!!Error: HTTP {r.status_code}" + (f" (retry-after > {cap:.0f}s)" if d is None and r.status_code in _RETRYABLE and attempt < sess.max_retries else "") + (f": {body}" if body else "")
                     yield err; return [{"type": "text", "text": err}]
+                if sess.stream:  # TTFT = first SSE event (prefill done), not first visible chunk; hidden thinking must count in decode window
+                    _il = r.iter_lines
+                    def _probe(*a, **k):
+                        for line in _il(*a, **k):
+                            if line and STATS.get('t_ttft') is None: STATS['t_ttft'] = time.time()
+                            yield line
+                    r.iter_lines = _probe
                 gen = parse_fn(r)
                 try:
                     while True:
@@ -628,7 +635,7 @@ class BaseSession:
         self.api_key = cfg['apikey']
         self.api_base = cfg['apibase'].rstrip('/')
         self.model = cfg.get('model', '')
-        default_context_win = 35000; default_cut_msg_interval = 7
+        default_context_win = 38000; default_cut_msg_interval = 8
         if 'deepseek' in self.model.lower():
             default_context_win = 80000; default_cut_msg_interval = 25; self.trim_keep_rate = 0.3
         self.context_win = cfg.get('context_win', default_context_win)
