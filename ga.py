@@ -302,11 +302,12 @@ class GenericAgentHandler(BaseHandler):
 
     def do_code_run(self, args, response):
         '''执行代码片段，有长度限制，不允许代码中放大量数据，如有需要应当通过文件读取进行。'''
-        code_type = args.get("type", "python")
+        code_type = args.get("type") or "python"
         code = args.get("code") or args.get("script")
         if not code:
             code = self._extract_code_block(response, code_type)
             if not code: return StepOutcome("[Error] Code missing. Must use reply code block or 'script' arg.", next_prompt="\n")
+        if not args.get("type") and re.match(r"^\s*(ls|cd|pwd|dir|echo|cat|git|pip|npm|curl|ssh)(\s|$)", code): code_type = "shell"
         timeout = _arg(args, "timeout", 60, int)
         raw_path = os.path.join(self.cwd, args.get("cwd", './'))
         cwd = os.path.normpath(os.path.abspath(raw_path))

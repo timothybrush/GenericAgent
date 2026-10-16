@@ -595,13 +595,6 @@ class AgentManager:
         lines = [f"    '{k}': {json.dumps(v, ensure_ascii=False)}," if isinstance(v, str) else f"    '{k}': {v}," for k, v in d.items()]
         return "{\n" + "\n".join(lines) + "\n}"
 
-    def _invalidate_mykey_cache(self) -> None:
-        self.ensure_ga_import_path()
-        sys.modules.pop("mykey", None)
-        with contextlib.suppress(Exception):
-            import llmcore
-            llmcore._mykey_mtime = None
-
     def _profile_keys(self) -> List[str]:
         self.ensure_ga_import_path()
         from llmcore import reload_mykeys
@@ -679,34 +672,15 @@ class AgentManager:
 
     def _save_mykey_text(self, text: str) -> list:
         self._mykey_file().write_text(text, encoding="utf-8")
-        self._invalidate_mykey_cache()
-        self._reload_live_agents()
-        return self.list_model_profiles()
-
-    def _reload_live_agents(self) -> None:
-        """mykey.py 改动后，强制所有活着的会话 agent 重建 LLM session，让新 key/模型
-        立即生效（无需重启）。重建保留对话 history（agentmain 内部用 oldhistory 接回）。
-
-        纯 bridge 侧实现，不改 agentmain：每次调 agent.load_llm_sessions() 前，把
-        llmcore 的全局 mtime 标志清空（与 _invalidate_mykey_cache 同一手法），使其内部
-        reload_mykeys() 报告 changed=True、从而真正重建——否则刷新模型列表等路径会先
-        消费掉变更标志，常驻 agent 的 load_llm_sessions 会因 changed=False 跳过重建。"""
-        self.ensure_ga_import_path()
-        try:
-            import llmcore
-        except Exception:
-            return
         with self.lock:
-            agents = [s.agent for s in self.sessions.values() if getattr(s, "agent", None) is not None]
-        for agent in agents:
-            fn = getattr(agent, "load_llm_sessions", None)
-            if not callable(fn):
-                continue
-            try:
-                llmcore._mykey_mtime = None   # 让本次 reload_mykeys() 视为“已变更”，触发真正重建
-                fn()
-            except Exception as e:
-                bridge_print(f"[bridge] reload live agent failed: {e}")
+            for sess in self.sessions.values():
+                if sess.agent is not None:
+                    try:
+                        sess.agent.list_llms()
+                        emit_session_state(sess, sess.status)
+                    except Exception as e:
+                        bridge_print(f"[model reload] {sess.id}: {e}")
+        return self.list_model_profiles()
 
     def add_model_profile(self, data: dict) -> dict:
         cfg = self._build_cfg(data)
@@ -775,6 +749,9 @@ class AgentManager:
             agentmain = importlib.import_module("agentmain")
             GA = getattr(agentmain, "GenericAgent")
             agent = GA()
+            no = sess.llm_no if sess.llm_no is not None else _global_default_llm_no()
+            if no is not None:
+                agent.next_llm(int(no))
             agent.inc_out = True
             agent.verbose = True
             threading.Thread(target=agent.run, daemon=True, name=f"GA-{sess.id}").start()
@@ -830,7 +807,7 @@ class AgentManager:
             cfg = mk.get(k) if isinstance(mk.get(k), dict) else {}
             if "mixin" in k:
                 members = [str(m) for m in (cfg.get("llm_nos") or [])]
-                out.append({"id": i, "varName": k, "kind": "mixin", "name": "",
+                out.append({"id": i, "varName": k, "kind": "mixin", "name": str(cfg.get("name") or k),
                             "members": members, "active": i == active})
             else:
                 name = self._base_display_name(k, cfg)
@@ -905,14 +882,14 @@ class AgentManager:
     def _live_model(sess: Session) -> Optional[dict]:
         """该会话 agent 当前真正在用的模型(渠道组会随故障转移变化)。
         agent 还没建(没跑过 turn)时返回静态绑定信息,前端据 llmNo 回显选择器。
-        llmNo: 始终以 sess.llm_no 为权威(用户选择),agent.llm_no 在初始化窗口可能滞后。"""
+        已创建的 agent 是模型选择的唯一来源。"""
         ag = getattr(sess, "agent", None)
         if ag is None:
             return {"current": None, "isMixin": False, "llmNo": sess.llm_no,
                     "runningLlmNo": sess.running_llm_no, "runningModel": sess.running_model}
         try:
             back = ag.llmclient.backend
-            live_no = sess.llm_no if sess.llm_no is not None else getattr(ag, "llm_no", 0)
+            live_no = sess.llm_no = ag.llm_no
             if "Mixin" in type(back).__name__:
                 return {"current": back.current_name, "isMixin": True, "llmNo": live_no,
                         "runningLlmNo": sess.running_llm_no, "runningModel": sess.running_model}
@@ -1114,13 +1091,8 @@ class AgentManager:
                     except Exception:
                         pass
             agent = sess.agent
-            # 模型取会话绑定 sess.llm_no,未绑定回退全局默认。切换走 set_session_model。
-            no = sess.llm_no if sess.llm_no is not None else _global_default_llm_no()
-            if no is not None and hasattr(agent, "next_llm"):
-                with contextlib.suppress(Exception):
-                    agent.next_llm(int(no))
             with self.lock:
-                sess.running_llm_no = getattr(agent, "llm_no", no)
+                sess.running_llm_no = agent.llm_no
                 try:
                     running_backend = agent.llmclient.backend
                     sess.running_model = str(
@@ -1345,18 +1317,18 @@ class AgentManager:
     def set_session_model(self, sid: str, llm_no: int) -> dict:
         """Bind a model to a session.
 
-        An idle agent switches immediately. A running turn keeps its captured client;
-        the new binding is applied at the start of the next turn.
+        Existing agents own selection; running turns ignore switch requests.
         """
         with self.mutation():
             sess = self.sessions.get(sid)
             if not sess:
                 raise web.HTTPNotFound(text=json.dumps({"error": f"session not found: {sid}"}, ensure_ascii=False), content_type="application/json")
-            sess.llm_no = int(llm_no)
-            if (sess.status != "running" and sess.agent is not None
-                    and hasattr(sess.agent, "next_llm")):
-                with contextlib.suppress(Exception):
+            if sess.status != "running":
+                if sess.agent is None:
+                    sess.llm_no = int(llm_no)
+                else:
                     sess.agent.next_llm(int(llm_no))
+                    sess.llm_no = sess.agent.llm_no
             sess.updated_at = time.time()
             self._persist_session(sess)
         return {"ok": True, "sessionId": sid, "llmNo": sess.llm_no, "model": self._live_model(sess)}
@@ -2971,18 +2943,6 @@ def create_app():
     app.router.add_post("/services/bridge/exit", bridge_exit_handler)
     if _e2e_control_token() is not None:
         app.router.add_post("/__e2e__/next-turn", e2e_next_turn_handler)
-
-    # Serve static frontend (desktop/static/)
-    static_dir = APP_DIR / "desktop" / "static"
-
-    async def index_handler(request):
-        return web.FileResponse(
-            static_dir / "index.html",
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
-        )
-
-    app.router.add_get("/", index_handler)
-    app.router.add_static("/", static_dir, show_index=False)
 
     async def on_startup(app):
         hub.loop = asyncio.get_running_loop()
