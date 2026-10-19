@@ -19,16 +19,26 @@ class HubClient:
     def __init__(self, name, put_task=None, get_outputs=None, abort=None, state=None, on_ev=None, sub=(), fixed=False, llm=None, inject=None):
         self.name, self.put_task, self.get_outputs, self.abort, self.llm, self.inject = name, put_task, get_outputs, abort, llm, inject
         self.state, self.on_ev, self.sub, self.fixed = state or dict, on_ev, list(sub), fixed  # fixed -> stable name
+        self._closed, self._task = False, None
         self._tc, self._ws, self._lp = {}, None, None   # (i,j) -> (fp, title): a finished step is never re-scanned
     def emit(self, topic, data=None, to=None):          # thread-safe fire-and-forget from the host thread
         if self._ws and self._lp: asyncio.run_coroutine_threadsafe(self._ws.send(json.dumps(
             {'op': 'ev', 'topic': topic, 'to': to, 'data': data}, default=str)), self._lp)
     def start(self):
-        threading.Thread(target=lambda: asyncio.run(self._loop()), daemon=True).start(); return self
+        def run():
+            try: asyncio.run(self._loop())
+            except asyncio.CancelledError: pass  # explicit close is normal shutdown
+        threading.Thread(target=run, daemon=True).start(); return self
+    def close(self):
+        """Retire a host instance without reconnecting it."""
+        self._closed = True
+        if self._lp and self._lp.is_running() and self._task:
+            self._lp.call_soon_threadsafe(self._task.cancel)
     async def _loop(self):
+        self._lp, self._task = asyncio.get_running_loop(), asyncio.current_task()
         try: import websockets
         except ImportError: return
-        while True:
+        while not self._closed:
             try:
                 async with websockets.connect(URL, open_timeout=3, max_size=None) as ws:
                     self._ws, self._lp = ws, asyncio.get_running_loop()
