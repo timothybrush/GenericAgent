@@ -89,7 +89,9 @@ class HubClient:
         elif op == 'abort': data = (await asyncio.to_thread(self.abort) or {'ok': 1}) if self.abort else {'error': 'no abort hook', 'code': 'nosupport'}
         elif op == 'llm': data = await asyncio.to_thread(self.llm, c.get('no')) if self.llm else {'error': 'no llm hook', 'code': 'nosupport'}
         elif op == 'inject': data = (await asyncio.to_thread(self.inject, c.get('kind'), c.get('text')) or {'ok': 1}) if self.inject else {'error': 'no inject hook', 'code': 'nosupport'}
-        await ws.send(json.dumps({'op': 'r', 'id': c.get('id'), 'name': self.name, 'data': data}, default=str))
+        after_reply = data if callable(data) else None  # deferred host action, e.g. exit after acknowledgement
+        await ws.send(json.dumps({'op': 'r', 'id': c.get('id'), 'name': self.name, 'data': {'ok': 1} if after_reply else data}, default=str))
+        if after_reply: await asyncio.to_thread(after_reply)
 
 _ROUTES = {'put': ('POST', 'put'), 'abort': ('POST', 'abort'), 'intervene': ('POST', 'intervene'), 'keyinfo': ('POST', 'keyinfo'),
            'llm': ('POST', 'llm'), 'llms': ('GET', 'llms'), 'messages': ('GET', 'messages')}
@@ -155,6 +157,17 @@ def connect(agent, name=None, put_task=None, get_outputs=None, abort=None, fold=
                                               'llm': getattr(getattr(agent, 'llmclient', None), 'name', '')})
         return agent._hub.start()
     except Exception: return None
+
+def phone_session():
+    from agentmain import GenericAgent
+    agent = GenericAgent()
+    def put(text):
+        if text == '/exit': return lambda: (agent.abort(), agent.task_queue.put('exit'))
+        if agent.is_running: return {'error': 'busy', 'code': 'busy'}
+        agent.put_task(text, source='hub')
+    client = connect(agent, 'phone', put_task=put)
+    agent.run()
+    client.close()
 
 # ------------------------------- server (python hub.py) -------------------------------
 if __name__ == '__main__':
@@ -241,6 +254,12 @@ if __name__ == '__main__':
     async def api_messages(name: str, detail: int = 1, sig: str = None, since: int = 0): return out(await ask(name, {'op': 'get', 'detail': detail, 'sig': sig, 'since': since}))
     @app.get('/api/{name}/seg/{i}/{j}')
     async def api_seg(name: str, i: int, j: int, off: int = 0): return out(await ask(name, {'op': 'seg', 'i': i, 'j': j, 'off': off}))
+    @app.post('/api/sessions')
+    async def api_new_session():
+        import subprocess
+        p = subprocess.Popen([sys.executable, '-c', 'from frontends.hub import phone_session; phone_session()'],
+                             cwd=os.path.dirname(HERE), creationflags=0x08000008 if os.name == 'nt' else 0)
+        return {'ok': 1, 'name': f'phone-{p.pid}'}
     @app.post('/api/{name}/put')
     async def api_put(name: str, body: dict):
         t = body.get('text', '')
