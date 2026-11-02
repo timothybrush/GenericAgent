@@ -8,11 +8,13 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import time
 import urllib.error
 import urllib.request
 import zlib
+from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -824,6 +826,7 @@ class HTTPLocalProxy:
         self._app = self._runner = self._site = self._receiver = None
         self._pending, self._closed = {}, asyncio.Event()
         self._counter = 0
+        self.last_used = time.monotonic()  # 供上层回收空闲代理
 
     async def start(self):
         if self._runner:
@@ -866,6 +869,7 @@ class HTTPLocalProxy:
         return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if allowed else {}
 
     async def _handle(self, request):
+        self.last_used = time.monotonic()
         _, web, _ = _http_modules()
         cors_headers = self._cors_headers(request)
         if request.method == "OPTIONS":
@@ -1080,12 +1084,138 @@ async def connect_code(
     )
 
 
+# ---- 多人组：同一 UUID 即全部权限；名单走大厅，数据走两两派生的普通 1v1 房间 ----
+
+async def retry_forever(attempt, on_error=None, *, stable=30, window=60, budget=8):
+    """永久重试 attempt()。节奏三层:
+    1) 本轮活过 stable 秒(正常会话被掉线/被顶号) -> 0.2~1s 秒级重连;
+    2) 秒断/连不上 -> 抖动指数退避 1,2,4..60s, 防"配对即断"空转;
+    3) 兜底: 任意 window 秒内最多 budget 次, 远低于信令服务器每 IP 限速。
+    抖动也避免服务端重启时大量客户端同一秒齐涌。"""
+    loop = asyncio.get_running_loop()
+    delay, recent = 0, deque()
+    while True:
+        now = loop.time()
+        while recent and now - recent[0] >= window:
+            recent.popleft()
+        if len(recent) >= budget:
+            await asyncio.sleep(recent[0] + window - now)
+            continue
+        recent.append(now)
+        try:
+            await attempt()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if on_error:
+                on_error(exc)
+        delay = 0 if loop.time() - now >= stable else min(max(delay * 2, 1), 60)
+        await asyncio.sleep(random.uniform(0.2, 1) if delay == 0 else delay * random.uniform(0.5, 1.5))
+
+
+def pair_room(room: str, caller: str, callee: str) -> str:
+    """主叫到被叫的专属房间：双方独立算出同一值；有方向，A 呼 B 与 B 呼 A 互不干扰。"""
+    return hashlib.sha256(f"{room}\n{caller}\n{callee}".encode()).hexdigest()
+
+
+class Group:
+    """以成员名 me 加入 UUID room 的多人组。
+
+    大厅连接收在线名单(变化时推送，无轮询)并转发呼叫。两两连接按需建立：
+    open(peer) 经大厅呼叫对方，双方进入 pair_room(主叫, 被叫) 的普通 P2PSocket，
+    主叫交给 use(socket, peer)，被叫交给 serve(socket, peer)。主叫断线自动重呼；
+    close(peer) 停止，对方离组时暂停、回来后自动恢复。不 open 就不占连接。
+    同名重入会顶掉旧连接，因此每个进程须用唯一成员名。
+    """
+
+    def __init__(self, signal_url, room, me, serve, use, *, access_key=DEFAULT_ACCESS_KEY):
+        self.signal_url, self.room, self.me = signal_url, room, me
+        self.serve, self.use, self.access_key = serve, use, access_key
+        self.members: set[str] = set()
+        self._ws = None
+        self._wanted: set[str] = set()
+        self._out: dict[str, asyncio.Task] = {}  # 本端主叫
+        self._in: dict[str, asyncio.Task] = {}   # 对方呼入
+
+    async def run(self):
+        try:
+            await retry_forever(self._lobby)
+        finally:
+            for task in [*self._out.values(), *self._in.values()]:
+                task.cancel()
+
+    def open(self, peer):
+        self._wanted.add(peer)
+        self._sync(self.members)
+
+    def close(self, peer):
+        self._wanted.discard(peer)
+        if task := self._out.pop(peer, None):
+            task.cancel()
+
+    async def _lobby(self):
+        room = hashlib.sha256(f"{self.room}:lobby".encode()).hexdigest()
+        sep = "&" if "?" in self.signal_url else "?"
+        url = f"{self.signal_url}{sep}{urlencode({'room': room, 'member': self.me})}"
+        seq = 0  # 服务端广播在锁外发送可能乱序，只认更大的 seq
+        async with websockets.connect(
+            signed_url(url, "ws", room, self.access_key), ping_interval=15, ping_timeout=10,
+        ) as ws:
+            self._ws = ws
+            try:
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    if msg.get("type") == "members" and msg["seq"] > seq:
+                        seq = msg["seq"]
+                        self._sync(set(msg["members"]) - {self.me})
+                    elif msg.get("type") == "call":
+                        self._answer(msg["from"])
+            finally:
+                self._ws = None
+
+    def _sync(self, members):
+        self.members = members
+        for tasks in (self._out, self._in):
+            for peer in set(tasks) - members:
+                tasks.pop(peer).cancel()
+        for peer in (self._wanted & members) - set(self._out):
+            self._out[peer] = asyncio.create_task(retry_forever(lambda peer=peer: self._call(peer)))
+
+    async def _call(self, peer):
+        if self._ws is None:
+            raise ConnectionError("lobby offline")
+        await self._ws.send(json.dumps({"type": "call", "to": peer}))
+        await self._link(pair_room(self.room, self.me, peer), self.use, peer)
+
+    def _answer(self, peer):
+        """每次呼叫只接一次；对方重呼时旧连接必已失效，直接替换。"""
+        if old := self._in.pop(peer, None):
+            old.cancel()
+
+        async def once():
+            with suppress(Exception):
+                await self._link(pair_room(self.room, peer, self.me), self.serve, peer)
+            if self._in.get(peer) is task:
+                del self._in[peer]
+        task = self._in[peer] = asyncio.create_task(once())
+
+    async def _link(self, room, handler, peer):
+        socket = await P2PSocket.connect(
+            self.signal_url, room, access_key=self.access_key,
+            direct_timeout=15, peer_timeout=15,
+        )
+        try:
+            await handler(socket, peer)
+        finally:
+            await socket.close()
+
+
 connect = P2PSocket.connect
 
 __all__ = [
     "DEFAULT_ACCESS_KEY", "ROOMS_FILE", "Invite", "P2PSocket", "Signal",
     "HTTPExporter", "HTTPLocalProxy", "export_http", "mount_http",
     "connect", "connect_code", "connect_saved", "create_code", "load_room",
-    "save_room", "signed_url",
+    "save_room", "signed_url", "Group", "pair_room", "retry_forever",
 ]
 
